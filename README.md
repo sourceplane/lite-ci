@@ -1,327 +1,530 @@
 # liteci - Schema-Driven Planner Engine
 
-A policy-aware workflow compiler that turns **intent** into executable **plan DAGs**. Built on CNCF principles.
+A **policy-aware workflow compiler** that turns **intent** into executable **plan DAGs**. Built on CNCF principles.
+
+Transform declarative CI/CD intents into deterministic execution plans with automatic environment expansion, policy validation, and multi-platform support.
 
 ```
-Intent.yaml + Jobs.yaml + Schemas
+Intent.yaml + Job Compositions + Schemas
           ↓
-    Planner Engine
+    Planner Engine (6-stage compiler)
           ↓
-    Plan.json (DAG)
+    Plan.json (Fully resolved DAG)
+```
+
+## ✨ Key Features
+
+- **🎯 Schema-Driven** - All validation rules live inside the provider
+- **🔐 Policy-First** - Non-negotiable constraints at the group/domain level
+- **🔄 Auto-Expansion** - Environment × Component matrix with intelligent merging
+- **🔗 Dependency Resolution** - Automatic DAG creation with cycle detection
+- **🐍 Cross-Platform** - Linux, macOS support (amd64, arm64)
+- **🐳 OCI Distribution** - Docker/Podman/containerd/Kubernetes compatible
+- **⚡ Deterministic** - Same inputs → Same outputs, every time
+- **📊 Debuggable** - Detailed phase-by-phase IR dumps
+
+## Installation
+
+### Option 1: Direct Binary Download (Recommended)
+
+**Latest Release (v0.1.2):**
+
+```bash
+# macOS (arm64 - Apple Silicon)
+curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.1.2/liteci_v0.1.2_darwin_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/liteci
+chmod +x /usr/local/bin/liteci
+
+# macOS (amd64 - Intel)
+curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.1.2/liteci_v0.1.2_darwin_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/liteci
+chmod +x /usr/local/bin/liteci
+
+# Linux (amd64)
+curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.1.2/liteci_v0.1.2_linux_amd64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/liteci
+chmod +x /usr/local/bin/liteci
+
+# Linux (arm64)
+curl -L https://github.com/sourceplane/lite-ci/releases/download/v0.1.2/liteci_v0.1.2_linux_arm64.tar.gz | tar xz
+sudo mv entrypoint /usr/local/bin/liteci
+chmod +x /usr/local/bin/liteci
+```
+
+Verify installation:
+```bash
+liteci --version
+liteci --help
+```
+
+### Option 2: From Source
+
+```bash
+git clone https://github.com/sourceplane/lite-ci.git
+cd lite-ci
+go build -o liteci ./cmd/liteci
+sudo mv liteci /usr/local/bin/
+```
+
+### Option 3: Docker/OCI Container
+
+```bash
+# Docker
+docker run ghcr.io/sourceplane/lite-ci:v0.1.2 plan -i intent.yaml
+
+# Podman (recommended for CI/CD)
+podman run ghcr.io/sourceplane/lite-ci:v0.1.2 plan -i intent.yaml
+
+# Kubernetes
+kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:v0.1.2
+```
+
+### Option 4: Using ORAS (OCI Registry As Storage)
+
+```bash
+# Pull the provider artifact
+oras pull ghcr.io/sourceplane/lite-ci:v0.1.2
+
+# Extract binaries
+tar -xzf liteci_v0.1.2_linux_amd64_oci.tar.gz
+./entrypoint plan -i intent.yaml
 ```
 
 ## Architecture
 
-### 3-Stage Compiler
+### 6-Stage Compiler Pipeline
 
-1. **Normalize** - Validate and canonicalize intent
-2. **Expand** - Environment × Component matrix with policy merging
-3. **Plan** - Bind jobs, resolve dependencies, materialize DAG
+1. **Load & Validate** - Parse YAML, validate against JSON schemas
+2. **Normalize** - Resolve wildcards, default missing fields
+3. **Expand** - Environment × Component matrix with policy merging
+4. **Bind Jobs** - Match components to job definitions, render templates
+5. **Resolve Dependencies** - Convert component deps → job deps, detect cycles
+6. **Materialize** - Output final plan with all references resolved
 
 ### Core Principles
 
 - **Intent is policy-aware, not execution-specific**
-- **Jobs define HOW, Intent defines WHAT**
+- **Jobs define HOW, Intent defines WHAT**  
 - **Plans are deterministic and execution-runtime agnostic**
 - **Schema controls everything** - inputs, expansion, validation
 
 ## Project Structure
 
 ```
-liteci/
+lite-ci/
 ├── cmd/liteci/
-│   └── main.go           # CLI entry point
+│   ├── main.go           # CLI entry point & command handlers
+│   └── models.go         # Domain models and types
 ├── internal/
-│   ├── model/            # Pure data structures
-│   │   ├── intent.go
-│   │   ├── job.go
-│   │   └── plan.go
-│   ├── loader/           # YAML/Schema loading
-│   ├── schema/           # Schema validation
+│   ├── model/            # Data structures
+│   │   ├── intent.go     # Intent model
+│   │   ├── job.go        # Job composition model
+│   │   └── plan.go       # Output plan model
+│   ├── loader/           # YAML parsing & loading
+│   ├── schema/           # JSON Schema validation
 │   ├── normalize/        # Intent canonicalization
 │   ├── expand/           # Env × Component expansion
-│   ├── planner/          # Job binding & DAG
+│   ├── planner/          # Dependency resolution & DAG
+│   │   ├── graph.go      # Graph algorithms
+│   │   └── planner.go    # Planner orchestration
 │   └── render/           # Plan materialization
-├── schemas/              # JSON schemas
+├── assets/
+│   └── config/
+│       ├── schemas/      # JSON schemas (intent, jobs, plan)
+│       └── compositions/ # Job definitions
+│           ├── charts/   # Helm Charts composition
+│           ├── helm/     # Helm deployment composition
+│           ├── helmCommon/ # Common Helm composition
+│           └── terraform/ # Terraform composition
 ├── examples/
-│   ├── intent.yaml
-│   └── jobs.yaml
-└── README.md
+│   └── intent.yaml       # Example intent file
+├── docs/
+│   ├── ARCHITECTURE.md   # Detailed design docs
+│   ├── RUNTIME_TOOLS.md  # Container runtime options
+│   └── *.md             # Additional documentation
+└── thin.provider.yaml    # Provider manifest
 ```
 
-## Getting Started
+## Quick Start
 
-### Build
+### 1. List Available Compositions
 
 ```bash
-go build -o liteci ./cmd/liteci
+liteci compositions --config-dir assets/config/compositions
 ```
 
-### Commands
+Output shows all available job compositions (helm, terraform, charts, etc.)
 
-#### 1. Validate Files
+### 2. Validate Intent File
 
 ```bash
-./liteci validate -i examples/intent.yaml -j examples/jobs.yaml
+liteci validate \
+  --intent examples/intent.yaml \
+  --config-dir assets/config/compositions
 ```
 
-Output:
-```
-✓ Intent is valid
-✓ Job registry is valid (4 jobs)
-✓ All validation passed
-```
+### 3. Debug Intent Processing
 
-#### 2. Debug Intent Processing
+See detailed logs of each compiler stage:
 
 ```bash
-./liteci debug -i examples/intent.yaml -j examples/jobs.yaml
+liteci debug \
+  --intent examples/intent.yaml \
+  --config-dir assets/config/compositions
 ```
 
-Output:
-```
-Metadata: {Name:microservices-deployment Description:...}
-Groups: 2
-  - platform: policies=map[isolation:strict ...], defaults=...
-  - onboarding: ...
-Environments: 3
-  - production: 3 components, policies=...
-  - staging: 3 components, policies=...
-  - development: 4 components, policies=...
-Components: 4
-  - web-app: type=helm, domain=platform, enabled=true, deps=1
-  - web-app-infra: type=terraform, domain=platform, enabled=true, deps=1
-  - common-services: type=helmCommon, enabled=true, deps=0
-  - component-charts: type=charts, enabled=true, deps=1
-```
-
-#### 3. Generate Plan
+### 4. Generate Execution Plan
 
 ```bash
-./liteci plan -i examples/intent.yaml -j examples/jobs.yaml -o plan.json --debug
+liteci plan \
+  --intent examples/intent.yaml \
+  --config-dir assets/config/compositions \
+  --output plan.json \
+  --debug
 ```
 
-Output:
-```
-📋 Loading intent...
-📚 Loading job registry...
-🔍 Normalizing intent...
-📦 Expanding (env × component)...
-Generated 11 component instances
-🔗 Binding jobs and resolving dependencies...
-🔄 Detecting cycles...
-📊 Topologically sorting...
-Sorted 11 jobs
-✨ Rendering plan...
+Output: Fully resolved execution DAG in `plan.json`
 
-Plan: microservices-deployment (Example multi-environment microservices deployment)
-Jobs: 11
+## Usage Examples
 
-Job: web-app@production.deploy
-  Component: web-app
-  Environment: production
-  Type: helm
-  Steps: 4
-  DependsOn: [common-services@production.deploy]
-...
+### Using with Docker
 
-✅ Plan generated with 11 jobs
+```bash
+docker run \
+  -v $(pwd):/workspace \
+  ghcr.io/sourceplane/lite-ci:v0.1.2 \
+  plan \
+  --intent /workspace/intent.yaml \
+  --config-dir /workspace/assets/config/compositions \
+  --output /workspace/plan.json
 ```
 
-## Intent Schema
+### Using with Podman (Recommended for CI/CD)
 
-### Top-Level Structure
+```bash
+podman run \
+  -v $(pwd):/workspace \
+  ghcr.io/sourceplane/lite-ci:v0.1.2 \
+  plan \
+  --intent /workspace/intent.yaml \
+  --config-dir /workspace/assets/config/compositions
+```
 
+### Using in Kubernetes
+
+```bash
+kubectl run lite-ci-planner \
+  --image=ghcr.io/sourceplane/lite-ci:v0.1.2 \
+  --rm -it \
+  -- plan \
+  --intent intent.yaml \
+  --config-dir /config/compositions
+```
+
+### Using in GitHub Actions
+
+```yaml
+- name: Generate CI Plan
+  uses: docker://ghcr.io/sourceplane/lite-ci:v0.1.2
+  with:
+    args: |
+      plan \
+      --intent intent.yaml \
+      --config-dir assets/config/compositions \
+      --output plan.json
+```
+
+## Configuration Schemas
+
+### Intent Schema
+
+The intent file defines your desired deployment across environments.
+
+**Example:**
 ```yaml
 apiVersion: sourceplane.io/v1
 kind: Intent
 metadata:
-  name: deployment-name
-  description: Human-readable description
+  name: microservices-deployment
+  description: Multi-environment microservices deployment
+
+# Domain-level configuration
 groups:
-  <domain-name>:
-    policies:       # Cannot be overridden
-      key: value
-    defaults:       # Can be overridden
-      key: value
-forEach:            # Environment definitions
-  <env-name>:
+  platform:
+    policies:
+      isolation: strict
+      approval_required: true
+    defaults:
+      timeout: 15m
+      retries: 2
+  
+# Environment definitions
+forEach:
+  production:
     selectors:
-      components: [list]
-      domains: [list]
-    defaults: {...}
-    policies: {...}
+      components: ["*"]
+      domains: ["platform"]
+    policies:
+      region: us-east-1
+  
+  staging:
+    selectors:
+      components: ["web-app", "common-services"]
+    defaults:
+      replicas: 2
+
+# Components
 components:
-  - name: comp-name
-    type: helm|terraform|charts|...
-    domain: domain-name
+  - name: web-app
+    type: helm
+    domain: platform
     enabled: true
-    inputs: {...}
-    labels: {...}
-    dependsOn: [...]
-```
-
-### Merge Precedence (Lowest → Highest)
-
-```
-1. Type defaults
-2. Job defaults
-3. Group defaults (from domain)
-4. Environment defaults
-5. Component inputs (highest priority)
-```
-
-**Policies**: Cannot be merged, enforced as constraints.
-
-## Job Registry Schema
-
-```yaml
-apiVersion: sourceplane.io/v1
-kind: JobRegistry
-jobs:
-  <component-type>:
-    name: job-name
-    description: Description
-    timeout: 15m
-    retries: 2
-    steps:
-      - name: step-name
-        run: |
-          shell command with {{.Variable}} templates
-        timeout: 5m
-        onFailure: stop|continue
-        retry: 3
     inputs:
-      key: default-value
+      image: web-app:1.0
+      replicas: 3
+    dependsOn:
+      - common-services
+
+  - name: web-app-infra
+    type: terraform
+    domain: platform
+    inputs:
+      aws_region: us-east-1
+    dependsOn:
+      - common-services
+
+  - name: common-services
+    type: helmCommon
+    enabled: true
+    inputs:
+      shared_namespace: common
 ```
 
-### Templating
+**Schema validation at:**
+```
+assets/config/schemas/intent.schema.yaml
+```
 
-Steps use Go `text/template` syntax:
-- `{{.ComponentName}}`
-- `{{.Environment}}`
-- `{{.chart}}` (from inputs)
-- `{{.region}}` (from merged config)
+### Job Composition Schema
 
-## Output Plan Schema
+Compositions define how to deploy components.
 
+**Available Compositions:**
+- **helm** - Helm chart deployments
+- **terraform** - Infrastructure as code
+- **charts** - Kubernetes manifests  
+- **helmCommon** - Common Helm definitions
+
+**Example Composition:**
+```yaml
+# assets/config/compositions/helm/job.yaml
+name: helm-deploy
+description: Deploy Helm charts
+timeout: 15m
+retries: 2
+steps:
+  - name: add-repo
+    run: helm repo add myrepo https://repo.example.com
+  - name: deploy
+    run: helm install {{.ComponentName}} myrepo/chart --namespace={{.Namespace}}
+inputs:
+  chart: "myrepo/chart"
+  namespace: "default"
+```
+
+### Output Plan Schema
+
+The generated plan is a fully resolved DAG.
+
+**Structure:**
 ```json
 {
-  "apiVersion": "v1",
+  "apiVersion": "sourceplane.io/v1",
   "kind": "Workflow",
   "metadata": {
-    "name": "deployment-name",
+    "name": "microservices-deployment",
     "description": "..."
+  },
+  "spec": {
+    "jobBindings": {
+      "helm": "helm-jobs",
+      "terraform": "terraform-jobs",
+      "charts": "charts-jobs"
+    }
   },
   "jobs": [
     {
-      "id": "component@environment.job-name",
-      "name": "job-name",
-      "component": "component-name",
-      "environment": "environment-name",
-      "type": "component-type",
-      "provider": "beeFlock",
-      "capability": "helm|terraform|...",
+      "id": "web-app@production.deploy",
+      "name": "deploy",
+      "component": "web-app",
+      "environment": "production",
+      "composition": "helm",
       "steps": [
         {
-          "name": "step-name",
-          "run": "resolved shell command",
-          "timeout": "5m",
-          "retry": 3,
-          "onFailure": "stop"
+          "name": "deploy",
+          "run": "helm install web-app repo/chart --namespace=production"
         }
       ],
-      "dependsOn": ["other-job@env.job"],
+      "dependsOn": ["common-services@production.deploy"],
       "timeout": "15m",
       "retries": 2,
-      "env": { "fully merged config" },
-      "labels": { "team": "platform", ... },
-      "config": { "same as env" }
+      "env": {
+        "image": "web-app:1.0",
+        "replicas": 3,
+        "namespace": "production"
+      }
     }
   ]
 }
 ```
 
-## Planner Phases
+### Configuration Merging (Priority Order)
+
+```
+Low Priority  ← Overridden by ←  High Priority
+1. Type defaults
+2. Composition defaults  
+3. Domain/Group defaults
+4. Environment defaults
+5. Component inputs (highest)
+```
+
+**Policy Rules:** Cannot be merged or overridden - enforced at all levels
+
+## Compiler Pipeline Phases
 
 ### Phase 0: Load & Validate
-- Load intent.yaml, jobs.yaml, schemas
-- Validate against schemas
+- Parse `intent.yaml` and compositions
+- Validate against JSON schemas
 - Fail fast on schema violations
 
 ### Phase 1: Normalize
-- Resolve wildcards in selectors
+- Resolve component selectors
+- Expand wildcards in domain/environment selectors
 - Default missing fields
-- Normalize dependency references
+- Canonicalize dependency references
 
 ### Phase 2: Expand (Env × Component)
-- For each environment, select components
+- For each environment, select matching components
 - Skip disabled components
-- Merge inputs per precedence
-- Resolve policies (constraint validation)
+- Merge inputs according to precedence
+- Validate policy constraints
 
 ### Phase 3: Job Binding
-- Match component type to job definition
-- Create JobInstance per component per environment
-- Render templates with merged config
+- Match component type → composition definition
+- Create JobInstance per (component × environment)
+- Render step templates with merged config
 
-### Phase 4: Dependency Resolution
+### Phase 4: Dependency Resolution  
 - Convert component dependencies → job dependencies
-- Handle scope (same-environment, cross-environment)
-- Resolve `environment: ""` to actual environment
+- Handle same-environment and cross-environment deps
+- Validate all dependencies exist
 
 ### Phase 5: DAG Validation
-- Topological sort (detect cycles)
-- Verify all dependencies resolve
+- Topological sort
+- Detect cycles (error if found)
+- Verify all references are concrete
 
 ### Phase 6: Materialize
-- Render final plan.json/plan.yaml
+- Render final `plan.json`
 - All templates resolved
 - All references concrete
+- Ready for execution
 
-## Key Features
-
-✅ **Policy-Aware** - Group policies are non-negotiable constraints  
-✅ **Schema-Driven** - Everything validated against schemas  
-✅ **Deterministic** - Plan is fully determined by inputs  
-✅ **Runtime-Agnostic** - Plan works with any CI executor  
-✅ **Debuggable** - Debug IR dumps at each phase  
-✅ **Extensible** - New component types via job registry  
-
-## Future Enhancements
-
-- [ ] Schema validation with JSON Schema v5
-- [ ] `plan diff` - Compare two plans
-- [ ] `plan --filter` - Filter by environment/components
-- [ ] `plan --dry-run` - Test without output
-- [ ] Template validation (catch unresolved vars)
-- [ ] DAG visualization (DOT format)
-- [ ] Incremental planning (changed components only)
-
-## Development
-
-### Testing
+## Command Reference
 
 ```bash
-go test ./...
+# List available compositions
+liteci compositions \
+  --config-dir assets/config/compositions
+
+# Validate intent without generating plan
+liteci validate \
+  --intent intent.yaml \
+  --config-dir assets/config/compositions
+
+# Debug with detailed logging
+liteci debug \
+  --intent intent.yaml \
+  --config-dir assets/config/compositions
+
+# Generate execution plan
+liteci plan \
+  --intent intent.yaml \
+  --config-dir assets/config/compositions \
+  --output plan.json \
+  --format json \
+  --debug
 ```
 
-### Debug Mode
+**Flags:**
+- `-i, --intent` - Path to intent YAML file
+- `-c, --config-dir` - Path to compositions directory (required)
+- `-o, --output` - Output plan file (default: plan.json)
+- `-f, --format` - Output format: json or yaml (default: json)
+- `--debug` - Enable verbose logging
 
+## Troubleshooting
+
+### "Config directory not found"
 ```bash
-./liteci plan --debug -i examples/intent.yaml -j examples/jobs.yaml
+# Ensure path exists
+ls -la assets/config/compositions/
+
+# Use absolute path if relative doesn't work
+liteci plan -i intent.yaml -c $(pwd)/assets/config/compositions
 ```
 
-Outputs detailed logs of each phase.
+### "Schema validation failed"
+```bash
+# Check your intent.yaml against the schema
+liteci validate -i intent.yaml -c assets/config/compositions
+```
 
-## CNCF Alignment
+### "Circular dependency detected"
+```bash
+# Use debug mode to see dependency graph
+liteci debug -i intent.yaml -c assets/config/compositions
+```
 
-- **OCI-compliant** - Uses standard YAML/JSON
-- **Multi-environment** - Built-in env handling
-- **Declarative** - Intent-based, not imperative
-- **Policy-first** - Governance at core
-- **Extensible** - Schema-driven, not hardcoded
+### Container authentication errors
+```bash
+# Login to GHCR
+docker login ghcr.io
+# or
+podman login ghcr.io
+```
+
+## Performance
+
+- **Typical plan generation:** < 1 second
+- **Supported environments:** Unlimited
+- **Supported components:** Unlimited  
+- **Cycle detection:** O(V + E) with DFS
+- **Topological sort:** O(V + E)
+
+## Contributing
+
+Contributions welcome! Areas:
+- New composition types
+- Schema enhancements
+- Performance optimizations
+- Documentation
+- Container runtime support
+
+## Resources
+
+- **Documentation:** [docs/](docs/)
+- **Examples:** [examples/](examples/)
+- **Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Runtime Tools:** [docs/RUNTIME_TOOLS.md](docs/RUNTIME_TOOLS.md)
 
 ## License
 
-MIT
+MIT License - See [LICENSE](LICENSE) file for details
+
+## Support
+
+- **Issues:** [GitHub Issues](https://github.com/sourceplane/lite-ci/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/sourceplane/lite-ci/discussions)
+- **Email:** team@sourceplane.io
