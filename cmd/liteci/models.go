@@ -45,8 +45,8 @@ type StepInfo struct {
 	Retry       int
 }
 
-// ExtractModelInfo extracts metadata from a loaded variant
-func ExtractModelInfo(modelName string, variant *loader.Variant, configDir string) (*ModelInfo, error) {
+// ExtractModelInfo extracts metadata from a loaded composition
+func ExtractModelInfo(modelName string, composition *loader.Composition, configDir string) (*ModelInfo, error) {
 	info := &ModelInfo{
 		Name:            modelName,
 		SupportedFields: make(map[string]string),
@@ -55,7 +55,7 @@ func ExtractModelInfo(modelName string, variant *loader.Variant, configDir strin
 	}
 
 	// Extract JobRegistry metadata
-	if len(variant.Jobs) > 0 {
+	if len(composition.Jobs) > 0 {
 		// Try to read job.yaml to extract JobRegistry metadata
 		jobPath := filepath.Join(configDir, modelName, "job.yaml")
 		jobData, err := os.ReadFile(jobPath)
@@ -74,7 +74,7 @@ func ExtractModelInfo(modelName string, variant *loader.Variant, configDir strin
 		}
 
 		// Build list of all available jobs from the registry
-		for i, job := range variant.Jobs {
+		for i, job := range composition.Jobs {
 			scope := ""
 			if len(job.Labels) > 0 {
 				if s, ok := job.Labels["scope"]; ok {
@@ -99,7 +99,7 @@ func ExtractModelInfo(modelName string, variant *loader.Variant, configDir strin
 	}
 
 	// Extract schema metadata
-	if variant.Schema != nil {
+	if composition.Schema != nil {
 		info.Title = fmt.Sprintf("%s Model", strings.ToTitle(strings.ToLower(modelName)))
 		info.Description = fmt.Sprintf("Model: %s", modelName)
 
@@ -137,8 +137,8 @@ func ExtractModelInfo(modelName string, variant *loader.Variant, configDir strin
 	}
 
 	// Extract job metadata (from first job / default job)
-	if len(variant.Jobs) > 0 {
-		job := &variant.Jobs[0] // Use first job as default
+	if len(composition.Jobs) > 0 {
+		job := &composition.Jobs[0] // Use first job as default
 		info.JobName = job.Name
 		info.JobDescription = job.Description
 
@@ -184,10 +184,10 @@ func PrintShortFormat(info *ModelInfo) {
 	fmt.Printf("%-20s  %s\n", info.Name, info.JobDescription)
 }
 
-// PrintLongFormat prints variant info in long format
+// PrintLongFormat prints composition info in long format
 func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 	fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Printf("Variant: %s\n", info.Name)
+	fmt.Printf("Composition: %s\n", info.Name)
 	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 	if info.Description != "" {

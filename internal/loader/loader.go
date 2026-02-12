@@ -58,8 +58,8 @@ func LoadJSONSchema(path string) (interface{}, error) {
 	return schema, nil
 }
 
-// Variant holds a variant's job definitions and schema
-type Variant struct {
+// Composition holds a composition's job definitions and schema
+type Composition struct {
 	Name     string
 	Jobs     []model.JobSpec           // All jobs for this component type
 	JobMap   map[string]*model.JobSpec // Quick lookup by job name
@@ -67,23 +67,23 @@ type Variant struct {
 	Bindings *model.JobBinding // Optional job binding declaration
 }
 
-// VariantRegistry holds all loaded variants
-type VariantRegistry struct {
-	Types    map[string]*Variant
+// CompositionRegistry holds all loaded compositions
+type CompositionRegistry struct {
+	Types    map[string]*Composition
 	Jobs     *model.JobRegistry // For backward compatibility
 	Bindings map[string]*model.JobBinding // Model -> JobBinding mapping
 }
 
-// LoadVariantsFromDir loads variant jobs and schemas from a config directory path.
+// LoadCompositionsFromDir loads composition jobs and schemas from a config directory path.
 // Supports glob patterns for recursive search:
 //   - Exact path: Non-recursive, looks for job.yaml and schema.yaml in immediate subdirectories
 //   - Path with *: Recursive glob pattern (single level)
 //   - Path with **: Recursive glob pattern (multiple levels)
 // Example paths:
-//   - "runtime/config/variants" - non-recursive: looks in {charts,helm,etc}/
+//   - "runtime/config/compositions" - non-recursive: looks in {charts,helm,etc}/
 //   - "runtime/config/*" - recursive: looks in all subdirectories
 //   - "runtime/config/**" - recursive: looks in all nested subdirectories
-func LoadVariantsFromDir(configDir string) (*VariantRegistry, error) {
+func LoadCompositionsFromDir(configDir string) (*CompositionRegistry, error) {
 	// Check if path contains glob patterns
 	isRecursive := strings.Contains(configDir, "*")
 
@@ -111,8 +111,8 @@ func LoadVariantsFromDir(configDir string) (*VariantRegistry, error) {
 		searchPaths = []string{configDir}
 	}
 
-	registry := &VariantRegistry{
-		Types:    make(map[string]*Variant),
+	registry := &CompositionRegistry{
+		Types:    make(map[string]*Composition),
 		Bindings: make(map[string]*model.JobBinding),
 		Jobs: &model.JobRegistry{
 			APIVersion: "sourceplane.io/v1",
@@ -251,7 +251,7 @@ func LoadVariantsFromDir(configDir string) (*VariantRegistry, error) {
 		}
 
 		// Store in registry with job map for quick lookup
-		variant := &Variant{
+		composition := &Composition{
 			Name:   typeName,
 			Jobs:   jobRegistry.Jobs,
 			JobMap: make(map[string]*model.JobSpec),
@@ -260,10 +260,10 @@ func LoadVariantsFromDir(configDir string) (*VariantRegistry, error) {
 
 		// Build job map for quick lookup by name
 		for i := range jobRegistry.Jobs {
-			variant.JobMap[jobRegistry.Jobs[i].Name] = &jobRegistry.Jobs[i]
+			composition.JobMap[jobRegistry.Jobs[i].Name] = &jobRegistry.Jobs[i]
 		}
 
-		registry.Types[typeName] = variant
+		registry.Types[typeName] = composition
 
 		// Also add jobs to the registry's job list for backward compatibility
 		registry.Jobs.Jobs = append(registry.Jobs.Jobs, jobRegistry.Jobs...)
@@ -276,14 +276,14 @@ func LoadVariantsFromDir(configDir string) (*VariantRegistry, error) {
 	return registry, nil
 }
 
-// ValidateComponentAgainstProfile validates a component against its profile schema
-func (reg *VariantRegistry) ValidateComponentAgainstVariant(component *model.Component) error {
-	variant, exists := reg.Types[component.Type]
+// ValidateComponentAgainstComposition validates a component against its composition schema
+func (reg *CompositionRegistry) ValidateComponentAgainstComposition(component *model.Component) error {
+	composition, exists := reg.Types[component.Type]
 	if !exists {
 		return fmt.Errorf("component type not found: %s", component.Type)
 	}
 
-	if variant.Schema == nil {
+	if composition.Schema == nil {
 		return fmt.Errorf("schema not loaded for component type: %s", component.Type)
 	}
 
@@ -296,7 +296,7 @@ func (reg *VariantRegistry) ValidateComponentAgainstVariant(component *model.Com
 		"labels": component.Labels,
 	}
 
-	if err := variant.Schema.Validate(validationObj); err != nil {
+	if err := composition.Schema.Validate(validationObj); err != nil {
 		return fmt.Errorf("component %s failed validation against type %s: %w", component.Name, component.Type, err)
 	}
 
@@ -304,9 +304,9 @@ func (reg *VariantRegistry) ValidateComponentAgainstVariant(component *model.Com
 }
 
 // ValidateAllComponents validates all components in a normalized intent
-func (reg *VariantRegistry) ValidateAllComponents(normalized *model.NormalizedIntent) error {
+func (reg *CompositionRegistry) ValidateAllComponents(normalized *model.NormalizedIntent) error {
 	for _, comp := range normalized.Components {
-		if err := reg.ValidateComponentAgainstVariant(&comp); err != nil {
+		if err := reg.ValidateComponentAgainstComposition(&comp); err != nil {
 			return err
 		}
 	}

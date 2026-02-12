@@ -37,7 +37,7 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 	for _, job := range jobInstances {
 		// Look up JobRegistry name from bindings
 		registryName := ""
-		if bindings, ok := jobBindings[job.Variant]; ok {
+		if bindings, ok := jobBindings[job.Composition]; ok {
 			registryName = bindings
 		}
 
@@ -46,7 +46,7 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 			Name:        job.Name,
 			Component:   job.Component,
 			Environment: job.Environment,
-			Variant:     job.Variant,
+			Composition: job.Composition,
 			JobRegistry: registryName,
 			Job:         job.Name, // The specific job name from the registry
 			Steps:       r.convertSteps(job.Steps),
@@ -135,7 +135,7 @@ func (r *Renderer) DebugDump(plan *model.Plan) string {
 		output += fmt.Sprintf("Job: %s\n", job.ID)
 		output += fmt.Sprintf("  Component: %s\n", job.Component)
 		output += fmt.Sprintf("  Environment: %s\n", job.Environment)
-		output += fmt.Sprintf("  Variant: %s\n", job.Variant)
+		output += fmt.Sprintf("  Composition: %s\n", job.Composition)
 		output += fmt.Sprintf("  Steps: %d\n", len(job.Steps))
 		output += fmt.Sprintf("  DependsOn: %v\n", job.DependsOn)
 		output += "\n"

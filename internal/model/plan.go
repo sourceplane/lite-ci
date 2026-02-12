@@ -20,7 +20,7 @@ type PlanJob struct {
 	Name        string                 `json:"name"`
 	Component   string                 `json:"component"`
 	Environment string                 `json:"environment"`
-	Variant     string                 `json:"variant"`
+	Composition string                 `json:"composition"`
 	JobRegistry string                 `json:"jobRegistry"`          // Name of the JobRegistry used
 	Job         string                 `json:"job"`                  // Specific job from registry
 	Steps       []PlanStep             `json:"steps"`

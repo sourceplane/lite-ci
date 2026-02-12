@@ -62,7 +62,7 @@ type JobInstance struct {
 	Name        string
 	Component   string
 	Environment string
-	Variant     string
+	Composition string
 	Steps       []RenderedStep
 	DependsOn   []string
 	Timeout     string

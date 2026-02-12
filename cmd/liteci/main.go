@@ -62,22 +62,22 @@ var debugCmd = &cobra.Command{
 	},
 }
 
-var variantsCmd = &cobra.Command{
-	Use:     "variants [variant]",
-	Aliases: []string{"variant"},
-	Short:   "Manage variants",
-	Long:    "List and inspect available variants. Use 'liteci variants' to list all, or 'liteci variants <name>' for details.",
+var compositionsCmd = &cobra.Command{
+	Use:     "compositions [composition]",
+	Aliases: []string{"composition"},
+	Short:   "Manage compositions",
+	Long:    "List and inspect available compositions. Use 'liteci compositions' to list all, or 'liteci compositions <name>' for details.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return listVariants(args)
+		return listCompositions(args)
 	},
 }
 
-var variantsListCmd = &cobra.Command{
-	Use:   "list [variant]",
-	Short: "List available variants",
-	Long:  "List available variants with descriptions and fields. Optionally specify a variant for detailed information.",
+var compositionsListCmd = &cobra.Command{
+	Use:   "list [composition]",
+	Short: "List available compositions",
+	Long:  "List available compositions with descriptions and fields. Optionally specify a composition for detailed information.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return listVariants(args)
+		return listCompositions(args)
 	},
 }
 
@@ -85,9 +85,9 @@ func init() {
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(debugCmd)
-	rootCmd.AddCommand(variantsCmd)
+	rootCmd.AddCommand(compositionsCmd)
 
-	variantsCmd.AddCommand(variantsListCmd)
+	compositionsCmd.AddCommand(compositionsListCmd)
 
 	// Global flags (available to all commands)
 	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", "Config directory for JobRegistry definitions (use * or ** for recursive scanning)")
@@ -105,10 +105,10 @@ func init() {
 
 	debugCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 
-	variantsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
-	variantsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
+	compositionsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
+	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
 
-	variantsCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details")
+	compositionsCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details")
 }
 
 func generatePlan() error {
@@ -118,21 +118,21 @@ func generatePlan() error {
 		return fmt.Errorf("failed to load intent: %w", err)
 	}
 
-	fmt.Println("□ Loading variants...")
-	variantRegistry, err := loader.LoadVariantsFromDir(configDir)
+	fmt.Println("□ Loading compositions...")
+	compositionRegistry, err := loader.LoadCompositionsFromDir(configDir)
 	if err != nil {
-		return fmt.Errorf("failed to load profiles from %s: %w", configDir, err)
+		return fmt.Errorf("failed to load compositions from %s: %w", configDir, err)
 	}
 
-	// Build VariantInfo map for the planner with default jobs
-	variantInfos := make(map[string]*planner.VariantInfo)
-	for typeName, variant := range variantRegistry.Types {
+	// Build CompositionInfo map for the planner with default jobs
+	compositionInfos := make(map[string]*planner.CompositionInfo)
+	for typeName, composition := range compositionRegistry.Types {
 		// Use first job as default if available
 		var defaultJob *model.JobSpec
-		if len(variant.Jobs) > 0 {
-			defaultJob = &variant.Jobs[0]
+		if len(composition.Jobs) > 0 {
+			defaultJob = &composition.Jobs[0]
 		}
-		variantInfos[typeName] = &planner.VariantInfo{
+		compositionInfos[typeName] = &planner.CompositionInfo{
 			Type:       typeName,
 			DefaultJob: defaultJob,
 		}
@@ -144,8 +144,8 @@ func generatePlan() error {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
-	fmt.Println("□ Validating components against variant schemas...")
-	if err := variantRegistry.ValidateAllComponents(normalized); err != nil {
+	fmt.Println("□ Validating components against composition schemas...")
+	if err := compositionRegistry.ValidateAllComponents(normalized); err != nil {
 		return fmt.Errorf("component validation failed: %w", err)
 	}
 
@@ -165,7 +165,7 @@ func generatePlan() error {
 	}
 
 	fmt.Println("□ Binding jobs and resolving dependencies...")
-	jobPlanner := planner.NewJobPlanner(variantInfos)
+	jobPlanner := planner.NewJobPlanner(compositionInfos)
 	jobInstances, err := jobPlanner.PlanJobs(instances)
 	if err != nil {
 		return fmt.Errorf("failed to plan jobs: %w", err)
@@ -294,59 +294,59 @@ func debugIntent() error {
 	return nil
 }
 
-func listVariants(args []string) error {
-	variantRegistry, err := loader.LoadVariantsFromDir(configDir)
+func listCompositions(args []string) error {
+	compositionRegistry, err := loader.LoadCompositionsFromDir(configDir)
 	if err != nil {
-		return fmt.Errorf("failed to load variants from %s: %w", configDir, err)
+		return fmt.Errorf("failed to load compositions from %s: %w", configDir, err)
 	}
 
-	// If a specific variant is requested, show detailed info
+	// If a specific composition is requested, show detailed info
 	if len(args) > 0 {
-		variantName := args[0]
-		variant, exists := variantRegistry.Types[variantName]
+		compositionName := args[0]
+		composition, exists := compositionRegistry.Types[compositionName]
 		if !exists {
-			return fmt.Errorf("variant not found: %s", variantName)
+			return fmt.Errorf("composition not found: %s", compositionName)
 		}
 
-		info, err := ExtractModelInfo(variantName, variant, configDir)
+		info, err := ExtractModelInfo(compositionName, composition, configDir)
 		if err != nil {
-			return fmt.Errorf("failed to extract variant info: %w", err)
+			return fmt.Errorf("failed to extract composition info: %w", err)
 		}
 
 		PrintLongFormat(info, expandJobs)
 		return nil
 	}
 
-	// List all variants
-	fmt.Println("Available Variants:")
+	// List all compositions
+	fmt.Println("Available Compositions:")
 
-	// Sort variant names for consistent output
-	var variantNames []string
-	for variantName := range variantRegistry.Types {
-		variantNames = append(variantNames, variantName)
+	// Sort composition names for consistent output
+	var compositionNames []string
+	for compositionName := range compositionRegistry.Types {
+		compositionNames = append(compositionNames, compositionName)
 	}
-	sort.Strings(variantNames)
+	sort.Strings(compositionNames)
 
 	// Print header
 	if longFormat {
-		// Long format - show each variant's full details
-		for _, variantName := range variantNames {
-			variant := variantRegistry.Types[variantName]
-			info, _ := ExtractModelInfo(variantName, variant, configDir)
+		// Long format - show each composition's full details
+		for _, compositionName := range compositionNames {
+			composition := compositionRegistry.Types[compositionName]
+			info, _ := ExtractModelInfo(compositionName, composition, configDir)
 			PrintLongFormat(info, expandJobs)
 		}
 	} else {
 		// Short format - just names and job descriptions
-		for _, variantName := range variantNames {
-			variant := variantRegistry.Types[variantName]
-			if len(variant.Jobs) > 0 {
-				fmt.Printf("  %s\n", variantName)
+		for _, compositionName := range compositionNames {
+			composition := compositionRegistry.Types[compositionName]
+			if len(composition.Jobs) > 0 {
+				fmt.Printf("  %s\n", compositionName)
 			}
 		}
 	}
 
 	if !longFormat {
-		fmt.Println("\nRun 'liteci variant <name>' for detailed information")
+		fmt.Println("\nRun 'liteci composition <name>' for detailed information")
 	}
 
 	return nil

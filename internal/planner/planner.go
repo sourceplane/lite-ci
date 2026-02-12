@@ -10,20 +10,20 @@ import (
 
 // JobPlanner binds components to jobs and creates instances
 type JobPlanner struct {
-	variants       map[string]*VariantInfo // Variant -> default job info
+	compositions    map[string]*CompositionInfo // Composition -> default job info
 	templateCache   map[string]*template.Template
 }
 
-// VariantInfo holds the default job for a variant
-type VariantInfo struct {
+// CompositionInfo holds the default job for a composition
+type CompositionInfo struct {
 	Type       string
 	DefaultJob *model.JobSpec
 }
 
-// NewJobPlanner creates a new job planner from a variant registry
-func NewJobPlanner(variants map[string]*VariantInfo) *JobPlanner {
+// NewJobPlanner creates a new job planner from a composition registry
+func NewJobPlanner(compositions map[string]*CompositionInfo) *JobPlanner {
 	return &JobPlanner{
-		variants:       variants,
+		compositions:   compositions,
 		templateCache:  make(map[string]*template.Template),
 	}
 }
@@ -35,12 +35,12 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 	for envName, envInstances := range instances {
 		for _, compInst := range envInstances {
 			// Get job definition for this component type
-			variantInfo, exists := jp.variants[compInst.Type]
+			compositionInfo, exists := jp.compositions[compInst.Type]
 			if !exists {
 				return nil, fmt.Errorf("no job definition for type: %s", compInst.Type)
 			}
 
-			jobDef := variantInfo.DefaultJob
+			jobDef := compositionInfo.DefaultJob
 			if jobDef == nil {
 				return nil, fmt.Errorf("no default job defined for type: %s", compInst.Type)
 			}
@@ -52,7 +52,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				Name:        jobDef.Name,
 				Component:   compInst.ComponentName,
 				Environment: envName,
-				Variant:     compInst.Type,
+				Composition: compInst.Type,
 				Timeout:     jobDef.Timeout,
 				Retries:     jobDef.Retries,
 				Labels:      compInst.Labels,
