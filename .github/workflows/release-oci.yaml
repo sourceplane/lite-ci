@@ -1,0 +1,84 @@
+name: release-oci
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  oci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up ORAS
+        run: |
+          curl -sSL https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz | tar xz
+          sudo mv oras /usr/local/bin/
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build OCI artifact layout
+        run: |
+          mkdir -p oci/bin/linux/amd64
+          mkdir -p oci/bin/linux/arm64
+          mkdir -p oci/bin/darwin/amd64
+          mkdir -p oci/bin/darwin/arm64
+          
+          # Extract entrypoint binaries from GoReleaser OCI archives
+          tar -xzf dist/liteci_*_linux_amd64_oci.tar.gz -C oci/bin/linux/amd64/ entrypoint 2>/dev/null || true
+          tar -xzf dist/liteci_*_linux_arm64_oci.tar.gz -C oci/bin/linux/arm64/ entrypoint 2>/dev/null || true
+          tar -xzf dist/liteci_*_darwin_amd64_oci.tar.gz -C oci/bin/darwin/amd64/ entrypoint 2>/dev/null || true
+          tar -xzf dist/liteci_*_darwin_arm64_oci.tar.gz -C oci/bin/darwin/arm64/ entrypoint 2>/dev/null || true
+          
+          # Copy provider resources
+          cp thin.provider.yaml oci/
+          cp -r runtime oci/
+          cp -r schemas oci/
+          
+          # Fix permissions
+          chmod +x oci/bin/*/*/entrypoint
+
+      - name: Push core OCI artifact (provider + schemas + runtime)
+        run: |
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            --artifact-type application/vnd.thin.provider.v1 \
+            oci/thin.provider.yaml:application/yaml \
+            oci/schemas/:application/vnd.sourceplane.schemas.v1 \
+            oci/runtime/:application/vnd.sourceplane.runtime.v1 \
+            oci/bin/:application/vnd.sourceplane.bin.v1
+
+      - name: Push examples layer (optional)
+        if: always()
+        run: |
+          if [ -d examples ]; then
+            oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-examples \
+              --artifact-type application/vnd.thin.provider.examples.v1 \
+              examples/:application/vnd.sourceplane.examples.v1
+          fi
+
+      - name: Verify OCI artifact
+        run: |
+          oras manifest fetch ghcr.io/${{ github.repository }}:${{ github.ref_name }}

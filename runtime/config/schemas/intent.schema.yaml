@@ -1,0 +1,116 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: liteci Intent
+description: Policy-aware deployment intent specification
+type: object
+required:
+  - apiVersion
+  - kind
+  - metadata
+  - components
+properties:
+  apiVersion:
+    type: string
+    pattern: ^sourceplane\.io/v[0-9]+$
+  kind:
+    type: string
+    enum:
+      - Intent
+  metadata:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
+        minLength: 1
+        maxLength: 63
+        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+      description:
+        type: string
+      namespace:
+        type: string
+        default: default
+  groups:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        policies:
+          type: object
+          additionalProperties: true
+        defaults:
+          type: object
+          additionalProperties: true
+  forEach:
+    type: object
+    additionalProperties:
+      type: object
+      required:
+        - selectors
+      properties:
+        selectors:
+          type: object
+          properties:
+            components:
+              type: array
+              items:
+                type: string
+            domains:
+              type: array
+              items:
+                type: string
+        defaults:
+          type: object
+          additionalProperties: true
+        policies:
+          type: object
+          additionalProperties: true
+  components:
+    type: array
+    items:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+        type:
+          type: string
+          minLength: 1
+        domain:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        inputs:
+          type: object
+          additionalProperties: true
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        dependsOn:
+          type: array
+          items:
+            type: object
+            required:
+              - component
+            properties:
+              component:
+                type: string
+              environment:
+                type: string
+              scope:
+                type: string
+                enum:
+                  - same-environment
+                  - cross-environment
+              condition:
+                type: string
+                enum:
+                  - success
+                  - always
+                  - failure

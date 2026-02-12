@@ -1,0 +1,68 @@
+apiVersion: sourceplane.io/v1
+kind: JobRegistry
+metadata:
+  name: charts-jobs
+  description: Helm charts packaging and publishing jobs
+jobs:
+  - name: package
+    description: Package chart definitions
+    timeout: 5m
+    retries: 1
+    labels:
+      scope: packaging
+    steps:
+      - name: lint
+        run: helm lint {{.registry}}/charts
+        timeout: 5m
+        onFailure: stop
+      - name: package
+        run: helm package {{.registry}}/charts -d dist/
+        timeout: 5m
+        onFailure: stop
+    inputs:
+      pullPolicy: Always
+
+  - name: publish
+    description: Publish charts to registry
+    timeout: 10m
+    retries: 2
+    labels:
+      scope: publishing
+    steps:
+      - name: lint
+        run: helm lint {{.registry}}/charts
+        timeout: 5m
+        onFailure: stop
+      - name: package
+        run: helm package {{.registry}}/charts -d dist/
+        timeout: 5m
+        onFailure: stop
+      - name: push
+        run: helm push dist/*.tgz oci://{{.registry}}/helm/charts
+        timeout: 5m
+        retry: 2
+        onFailure: stop
+      - name: verify
+        run: helm search repo oci://{{.registry}}/helm/charts
+        onFailure: continue
+    inputs:
+      pullPolicy: Always
+      registry: oci://mycompany.azurecr.io
+
+  - name: test
+    description: Test chart templates and values
+    timeout: 5m
+    retries: 1
+    labels:
+      scope: testing
+    steps:
+      - name: lint
+        run: helm lint {{.registry}}/charts --strict
+        timeout: 5m
+        onFailure: stop
+      - name: template-dry-run
+        run: helm template test {{.registry}}/charts --validate
+        timeout: 5m
+        onFailure: stop
+    inputs:
+      pullPolicy: Always

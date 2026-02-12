@@ -1,0 +1,68 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: liteci Job Registry
+description: Job execution definitions for component types
+type: object
+required:
+  - apiVersion
+  - kind
+  - jobs
+properties:
+  apiVersion:
+    type: string
+    pattern: ^sourceplane\.io/v[0-9]+$
+  kind:
+    type: string
+    enum:
+      - JobRegistry
+  jobs:
+    type: object
+    additionalProperties:
+      type: object
+      required:
+        - name
+        - steps
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        timeout:
+          type: string
+          pattern: ^[0-9]+(m|h|s)$
+        retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 0
+        steps:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - run
+            properties:
+              name:
+                type: string
+                minLength: 1
+              run:
+                type: string
+                minLength: 1
+              timeout:
+                type: string
+                pattern: ^[0-9]+(m|h|s)$
+              retry:
+                type: integer
+                minimum: 0
+                maximum: 10
+                default: 0
+              onFailure:
+                type: string
+                enum:
+                  - stop
+                  - continue
+                default: stop
+        inputs:
+          type: object
+          additionalProperties: true

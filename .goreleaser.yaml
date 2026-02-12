@@ -1,0 +1,55 @@
+version: 2
+
+project_name: liteci
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: entrypoint
+    main: ./cmd/liteci
+    binary: entrypoint
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+
+archives:
+  - id: oci-provider-bundle
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_oci
+    files:
+      - thin.provider.yaml
+      - runtime/**/*
+      - schemas/**/*
+      # intentionally NOT including examples
+    builds:
+      - entrypoint
+
+  - id: release-bundle
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    builds:
+      - entrypoint
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: sourceplane
+    name: devops-provider-bee-hive-style-gha-eks
+  prerelease: auto
