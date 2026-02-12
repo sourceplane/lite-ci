@@ -23,14 +23,6 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Set up ORAS
         run: |
           curl -sSL https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz | tar xz
@@ -42,6 +34,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build OCI artifact layout
         run: |
@@ -72,13 +72,11 @@ jobs:
             oci/bin/:application/vnd.sourceplane.bin.v1
 
       - name: Push examples layer (optional)
-        if: always()
+        if: success() && hashFiles('examples/') != ''
         run: |
-          if [ -d examples ]; then
-            oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-examples \
-              --artifact-type application/vnd.thin.provider.examples.v1 \
-              examples/:application/vnd.sourceplane.examples.v1
-          fi
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-examples \
+            --artifact-type application/vnd.thin.provider.examples.v1 \
+            examples/:application/vnd.sourceplane.examples.v1
 
       - name: Verify OCI artifact
         run: |
