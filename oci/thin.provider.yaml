@@ -18,34 +18,10 @@ distribution:
 
 runtime:
   default: native
-  supported:
-    - name: native
-      description: Direct binary execution (Linux, macOS, Windows)
-      tools: [direct execution]
-    - name: docker
-      description: OCI container via Docker
-      tools: [docker, docker-compose]
-      example: "docker run ghcr.io/sourceplane/lite-ci:v0.1.0"
-    - name: podman
-      description: OCI container via Podman (Docker-compatible)
-      tools: [podman, podman-compose]
-      example: "podman run ghcr.io/sourceplane/lite-ci:v0.1.0"
-    - name: containerd
-      description: OCI container via containerd
-      tools: [nerdctl, ctr]
-      example: "nerdctl run ghcr.io/sourceplane/lite-ci:v0.1.0"
-    - name: oras
-      description: OCI artifact registry (ORAS)
-      tools: [oras]
-      example: "oras pull ghcr.io/sourceplane/lite-ci:v0.1.0"
-    - name: kubernetes
-      description: OCI container in Kubernetes
-      tools: [kubectl, helm]
-      example: "kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:v0.1.0"
 
 entrypoint:
   executable: entrypoint
-  defaultArgs: -c "assets/config/**"
+  defaultArgs: -c "runtime/config/**"
 
 platforms:
   - os: linux
@@ -145,7 +121,7 @@ capabilities:
 
 # Provider-owned static assets
 assets:
-  root: ./assets
+  root: ./runtime
   contains:
     - profiles/
     - schemas/        # optional, provider-specific

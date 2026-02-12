@@ -1,0 +1,28 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: Terraform Component Type
+description: Schema for Terraform infrastructure components
+type: object
+properties:
+  name:
+    type: string
+    description: Component name
+  type:
+    type: string
+    const: terraform
+    description: Component type identifier
+  inputs:
+    type: object
+    description: Terraform-specific input values
+    properties:
+      workspace:
+        type: string
+        description: Terraform workspace name
+      autoApprove:
+        type: string
+        enum: ["true", "false"]
+        description: Auto-approve terraform apply
+      parallelism:
+        type: integer
+        minimum: 1
+        description: Terraform parallelism level
+    additionalProperties: true

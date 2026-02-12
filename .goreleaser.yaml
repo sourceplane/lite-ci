@@ -38,7 +38,7 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_oci
     files:
       - thin.provider.yaml
-      - runtime/**/*
+      - assets/**/*
 
       # intentionally NOT including examples
     builds:
