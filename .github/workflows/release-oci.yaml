@@ -56,7 +56,6 @@ jobs:
           # Copy provider resources
           cp thin.provider.yaml oci/
           cp -r runtime oci/
-          cp -r schemas oci/
           
           # Fix permissions
           chmod +x oci/bin/*/*/entrypoint
@@ -66,7 +65,6 @@ jobs:
           oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --artifact-type application/vnd.thin.provider.v1 \
             oci/thin.provider.yaml:application/yaml \
-            oci/schemas/:application/vnd.sourceplane.schemas.v1 \
             oci/runtime/:application/vnd.sourceplane.runtime.v1 \
             oci/bin/:application/vnd.sourceplane.bin.v1
 
