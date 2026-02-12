@@ -14,7 +14,7 @@ git:
 
 builds:
   - id: entrypoint
-    main: cmd/liteci/main.go
+    dir: cmd/liteci
     binary: entrypoint
     env:
       - CGO_ENABLED=0
