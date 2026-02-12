@@ -6,6 +6,12 @@ before:
   hooks:
     - go mod tidy
 
+git:
+  ignore_tags:
+    - '.*-rc.*'
+    - '.*-beta.*'
+  tag_sort: -version:refname
+
 builds:
   - id: entrypoint
     main: ./cmd/liteci
@@ -33,7 +39,7 @@ archives:
     files:
       - thin.provider.yaml
       - runtime/**/*
-      - schemas/**/*
+
       # intentionally NOT including examples
     builds:
       - entrypoint
@@ -51,5 +57,5 @@ checksum:
 release:
   github:
     owner: sourceplane
-    name: devops-provider-bee-hive-style-gha-eks
+    name: lite-ci
   prerelease: auto
