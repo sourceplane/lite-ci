@@ -3,6 +3,9 @@ name: release-oci
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
