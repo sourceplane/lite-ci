@@ -70,7 +70,7 @@ jobs:
         run: |
           PUSH_CMD="oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --artifact-type application/vnd.thin.provider.v1 \
-            oci/thin.provider.yaml:application/yaml \
+            oci/thin.provider.yaml:application/vnd.sourceplane.provider.v1 \
             oci/assets/:application/vnd.sourceplane.assets.v1 \
             oci/bin/linux/amd64/entrypoint:application/vnd.sourceplane.bin.linux-amd64 \
             oci/bin/linux/arm64/entrypoint:application/vnd.sourceplane.bin.linux-arm64 \
