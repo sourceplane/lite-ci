@@ -66,43 +66,23 @@ jobs:
           # Fix permissions
           chmod +x oci/bin/*/*/entrypoint
 
-      - name: Push provider manifest layer
+      - name: Push all layers to OCI registry
         run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+          PUSH_CMD="oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --artifact-type application/vnd.thin.provider.v1 \
-            oci/thin.provider.yaml:application/yaml
-
-      - name: Push assets layer
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            oci/assets/:application/vnd.sourceplane.assets.v1
-
-      - name: Push linux-amd64 binary layer
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            oci/bin/linux/amd64/entrypoint:application/vnd.sourceplane.bin.linux-amd64
-
-      - name: Push linux-arm64 binary layer
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            oci/bin/linux/arm64/entrypoint:application/vnd.sourceplane.bin.linux-arm64
-
-      - name: Push darwin-amd64 binary layer
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            oci/bin/darwin/amd64/entrypoint:application/vnd.sourceplane.bin.darwin-amd64
-
-      - name: Push darwin-arm64 binary layer
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            oci/bin/darwin/arm64/entrypoint:application/vnd.sourceplane.bin.darwin-arm64
-
-      - name: Push examples layer (optional)
-        if: success() && hashFiles('examples/') != ''
-        run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
-            --artifact-type application/vnd.thin.provider.v1 \
-            examples/:application/vnd.sourceplane.examples.v1
+            oci/thin.provider.yaml:application/yaml \
+            oci/assets/:application/vnd.sourceplane.assets.v1 \
+            oci/bin/linux/amd64/entrypoint:application/vnd.sourceplane.bin.linux-amd64 \
+            oci/bin/linux/arm64/entrypoint:application/vnd.sourceplane.bin.linux-arm64 \
+            oci/bin/darwin/amd64/entrypoint:application/vnd.sourceplane.bin.darwin-amd64 \
+            oci/bin/darwin/arm64/entrypoint:application/vnd.sourceplane.bin.darwin-arm64"
+          
+          # Add examples layer if it exists
+          if [ -d "examples/" ] && [ "$(ls -A examples/)" ]; then
+            PUSH_CMD="$PUSH_CMD examples/:application/vnd.sourceplane.examples.v1"
+          fi
+          
+          eval "$PUSH_CMD"
 
       - name: Verify OCI artifact
         run: |
