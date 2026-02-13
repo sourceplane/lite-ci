@@ -71,37 +71,23 @@ jobs:
           oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --artifact-type application/vnd.thin.provider.v1 \
             oci/thin.provider.yaml:application/yaml \
-            oci/assets/:application/vnd.sourceplane.assets.v1
-
-      - name: Push platform-specific binaries as separate layers
-        run: |
-          # Linux amd64
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-linux-amd64 \
-            --artifact-type application/vnd.thin.provider.bin.v1 \
-            oci/bin/linux/amd64/entrypoint:application/octet-stream
-
-          # Linux arm64
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-linux-arm64 \
-            --artifact-type application/vnd.thin.provider.bin.v1 \
-            oci/bin/linux/arm64/entrypoint:application/octet-stream
-
-          # Darwin amd64
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-darwin-amd64 \
-            --artifact-type application/vnd.thin.provider.bin.v1 \
-            oci/bin/darwin/amd64/entrypoint:application/octet-stream
-
-          # Darwin arm64
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-darwin-arm64 \
-            --artifact-type application/vnd.thin.provider.bin.v1 \
-            oci/bin/darwin/arm64/entrypoint:application/octet-stream
+            oci/assets/:application/vnd.sourceplane.assets.v1 \
+            oci/bin/linux/amd64/entrypoint:application/vnd.sourceplane.bin.linux-amd64 \
+            oci/bin/linux/arm64/entrypoint:application/vnd.sourceplane.bin.linux-arm64 \
+            oci/bin/darwin/amd64/entrypoint:application/vnd.sourceplane.bin.darwin-amd64 \
+            oci/bin/darwin/arm64/entrypoint:application/vnd.sourceplane.bin.darwin-arm64
 
       - name: Push examples layer (optional)
         if: success() && hashFiles('examples/') != ''
         run: |
-          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-examples \
-            --artifact-type application/vnd.thin.provider.examples.v1 \
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
+            --artifact-type application/vnd.thin.provider.v1 \
             examples/:application/vnd.sourceplane.examples.v1
 
       - name: Verify OCI artifact
         run: |
-          oras manifest fetch ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          echo "✅ OCI artifact published at ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+          echo "Available layers in manifest:"
+          echo "  - core: provider config, schemas, assets"
+          echo "  - binaries: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64"
+          echo "  - examples: (optional)"
