@@ -26,6 +26,7 @@ var (
 	environment    string
 	longFormat     bool
 	expandJobs     bool
+	viewPlan       string
 )
 
 var rootCmd = &cobra.Command{
@@ -99,6 +100,8 @@ func init() {
 	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (optional)")
+	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
+
 
 	validateCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	validateCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
@@ -240,6 +243,28 @@ func generatePlan() error {
 
 	fmt.Printf("✓ Plan generated with %d jobs\n", len(plan.Jobs))
 	fmt.Printf("✓ Saved to: %s\n", outputFile)
+
+	// Handle --view flag
+	if viewPlan != "" {
+		viewer := render.NewPlanViewer(plan)
+		var output string
+
+		switch {
+		case viewPlan == "dag":
+			output = viewer.ViewDAG()
+		case viewPlan == "dependencies":
+			output = viewer.ViewDependencies()
+		case strings.HasPrefix(viewPlan, "component="):
+			componentName := strings.TrimPrefix(viewPlan, "component=")
+			output = viewer.ViewByComponent(componentName)
+		default:
+			// Default to DAG view
+			output = viewer.ViewDAG()
+		}
+
+		fmt.Println("\n" + output)
+	}
+
 	return nil
 }
 
