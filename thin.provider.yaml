@@ -45,7 +45,7 @@ runtime:
 
 entrypoint:
   executable: entrypoint
-  defaultArgs: -c "assets/config/**"
+  defaultArgs: -c "{{.ProviderHome}}/assets/config/**"
 
 platforms:
   - os: linux
