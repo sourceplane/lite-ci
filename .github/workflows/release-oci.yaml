@@ -66,13 +66,34 @@ jobs:
           # Fix permissions
           chmod +x oci/bin/*/*/entrypoint
 
-      - name: Push core OCI artifact (provider + schemas + runtime)
+      - name: Push core OCI artifact (provider + schemas + assets)
         run: |
           oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }} \
             --artifact-type application/vnd.thin.provider.v1 \
             oci/thin.provider.yaml:application/yaml \
-            oci/assets/:application/vnd.sourceplane.assets.v1 \
-            oci/bin/:application/vnd.sourceplane.bin.v1
+            oci/assets/:application/vnd.sourceplane.assets.v1
+
+      - name: Push platform-specific binaries as separate layers
+        run: |
+          # Linux amd64
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-linux-amd64 \
+            --artifact-type application/vnd.thin.provider.bin.v1 \
+            oci/bin/linux/amd64/entrypoint:application/octet-stream
+
+          # Linux arm64
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-linux-arm64 \
+            --artifact-type application/vnd.thin.provider.bin.v1 \
+            oci/bin/linux/arm64/entrypoint:application/octet-stream
+
+          # Darwin amd64
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-darwin-amd64 \
+            --artifact-type application/vnd.thin.provider.bin.v1 \
+            oci/bin/darwin/amd64/entrypoint:application/octet-stream
+
+          # Darwin arm64
+          oras push ghcr.io/${{ github.repository }}:${{ github.ref_name }}-darwin-arm64 \
+            --artifact-type application/vnd.thin.provider.bin.v1 \
+            oci/bin/darwin/arm64/entrypoint:application/octet-stream
 
       - name: Push examples layer (optional)
         if: success() && hashFiles('examples/') != ''

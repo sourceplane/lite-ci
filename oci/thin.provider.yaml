@@ -65,35 +65,8 @@ layers:
   core:
     description: "Core provider bundle (provider config, schemas, bundled resources)"
     includes:
-      - thin.provider.yaml
-      - assets/**
-    required: true
-  
-  binaries:
-    linux-amd64:
-      description: "Linux x86_64 binary"
-      ociRef: linux-amd64
-      platform: linux/amd64
-      optional: false
-    
-    linux-arm64:
-      description: "Linux ARM64 binary"
-      ociRef: linux-arm64
-      platform: linux/arm64
-      optional: false
-    
-    darwin-amd64:
-      description: "macOS Intel x86_64 binary"
-      ociRef: darwin-amd64
-      platform: darwin/amd64
-      optional: false
-    
-    darwin-arm64:
-      description: "macOS Apple Silicon ARM64 binary"
-      ociRef: darwin-arm64
-      platform: darwin/arm64
-      optional: false
-  
+      - provider.yaml
+      - runtime/**
   examples:
     description: "Optional examples and use-case templates"
     optional: true
