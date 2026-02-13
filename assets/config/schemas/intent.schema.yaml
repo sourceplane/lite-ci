@@ -41,7 +41,7 @@ properties:
         defaults:
           type: object
           additionalProperties: true
-  forEach:
+  environments:
     type: object
     additionalProperties:
       type: object

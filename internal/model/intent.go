@@ -2,12 +2,12 @@ package model
 
 // Intent is the top-level CRD for declarative deployment
 type Intent struct {
-	APIVersion string            `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string            `yaml:"kind" json:"kind"`
-	Metadata   Metadata          `yaml:"metadata" json:"metadata"`
-	Groups     map[string]Group  `yaml:"groups" json:"groups"`
-	ForEach    map[string]ForEach `yaml:"forEach" json:"forEach"`
-	Components []Component       `yaml:"components" json:"components"`
+	APIVersion string               `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string               `yaml:"kind" json:"kind"`
+	Metadata   Metadata             `yaml:"metadata" json:"metadata"`
+	Groups     map[string]Group     `yaml:"groups" json:"groups"`
+	Environments map[string]Environment `yaml:"environments" json:"environments"`
+	Components []Component          `yaml:"components" json:"components"`
 }
 
 // Metadata holds standard object metadata
@@ -23,15 +23,15 @@ type Group struct {
 	Defaults map[string]interface{} `yaml:"defaults" json:"defaults"`
 }
 
-// ForEach defines environment runtime contexts
-type ForEach struct {
-	Selectors ForEachSelectors       `yaml:"selectors" json:"selectors"`
+// Environment defines environment runtime contexts
+type Environment struct {
+	Selectors EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
 	Defaults  map[string]interface{} `yaml:"defaults" json:"defaults"`
 	Policies  map[string]interface{} `yaml:"policies" json:"policies"`
 }
 
-// ForEachSelectors specifies which components apply to an environment
-type ForEachSelectors struct {
+// EnvironmentSelectors specifies which components apply to an environment
+type EnvironmentSelectors struct {
 	Components []string `yaml:"components" json:"components"`
 	Domains    []string `yaml:"domains" json:"domains"`
 }
@@ -59,7 +59,7 @@ type Dependency struct {
 type NormalizedIntent struct {
 	Metadata       Metadata
 	Groups         map[string]Group
-	Environments   map[string]ForEach
+	Environments   map[string]Environment
 	Components     map[string]Component
 	ComponentIndex map[string]Component // for fast lookup
 }

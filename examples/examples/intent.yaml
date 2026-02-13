@@ -22,7 +22,7 @@ groups:
       owner: onboarding-team
       timeout: 30m
 
-forEach:
+environments:
   production:
     selectors:
       components:

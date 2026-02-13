@@ -115,7 +115,7 @@ groups:              # Ownership/policy domains
     defaults:        # Can be overridden
       region: us-west-2
 
-forEach:             # Environment definitions
+environments:        # Environment definitions
   production:
     selectors:       # Which components apply
       components: [web-app, common-services]
@@ -179,7 +179,7 @@ type ComponentInstance struct {
 1. Type defaults (from schema)
 2. Job defaults (from jobs.yaml)
 3. Group defaults (from intent groups)
-4. Environment defaults (from forEach)
+4. Environment defaults (from environments)
 5. Component inputs (from intent components)
 
 **Key rule**: Policies are never merged, only validated/enforced.
@@ -397,7 +397,7 @@ groups:
       region: us-west-2
       replicas: 3
 
-forEach:
+environments:
   production:
     defaults:
       replicas: 10
@@ -420,7 +420,7 @@ groups:
     policies:
       isolation: strict
       
-forEach:
+environments:
   production:
     policies:
       approval: required
@@ -515,10 +515,10 @@ Policy propagates to all instances.
 
 ### 3. New Selector
 
-Extend `ForEachSelectors` in future:
+Extend `EnvironmentSelectors` in future:
 
 ```yaml
-forEach:
+environments:
   my-env:
     selectors:
       labels:           # Future: select by labels

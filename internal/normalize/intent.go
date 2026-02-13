@@ -17,7 +17,7 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 	normalized := &model.NormalizedIntent{
 		Metadata:       intent.Metadata,
 		Groups:         intent.Groups,
-		Environments:   intent.ForEach,
+		Environments:   intent.Environments,
 		Components:     make(map[string]model.Component),
 		ComponentIndex: make(map[string]model.Component),
 	}

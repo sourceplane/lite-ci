@@ -22,7 +22,7 @@ groups:
       owner: onboarding-team
       timeout: 30m
 
-forEach:
+environments:
   production:
     selectors:
       components:
@@ -64,6 +64,7 @@ forEach:
 
 components:
   - name: web-app
+    dir: service/web-app
     type: helm
     domain: platform
     enabled: true

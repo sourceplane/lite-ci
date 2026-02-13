@@ -259,7 +259,7 @@ groups:
       retries: 2
   
 # Environment definitions
-forEach:
+environments:
   production:
     selectors:
       components: ["*"]

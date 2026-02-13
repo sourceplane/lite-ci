@@ -70,12 +70,12 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 }
 
 // getApplicableComponents returns components that apply to an environment
-func (e *Expander) getApplicableComponents(env model.ForEach) []string {
+func (e *Expander) getApplicableComponents(env model.Environment) []string {
 	return env.Selectors.Components
 }
 
 // mergeInputs applies the merge precedence order
-func (e *Expander) mergeInputs(comp model.Component, env model.ForEach, envName string) map[string]interface{} {
+func (e *Expander) mergeInputs(comp model.Component, env model.Environment, envName string) map[string]interface{} {
 	merged := make(map[string]interface{})
 
 	// 1. Type defaults (empty for now, could come from schema)
