@@ -1,0 +1,128 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+
+metadata:
+  name: microservices-deployment
+  description: Example multi-environment microservices deployment
+  namespace: default
+
+groups:
+  platform:
+    policies:
+      environment: production-only
+      isolation: strict
+    defaults:
+      namespacePrefix: platform-
+      owner: platform-team
+
+  onboarding:
+    policies:
+      approval: required
+    defaults:
+      owner: onboarding-team
+      timeout: 30m
+
+forEach:
+  production:
+    selectors:
+      components:
+        - "web-app"
+        - "web-app-infra"
+        - "common-services"
+      domains:
+        - "platform"
+    defaults:
+      region: us-west-2
+      replicas: 3
+      logLevel: info
+    policies:
+      requireApproval: "true"
+
+  staging:
+    selectors:
+      components:
+        - "web-app"
+        - "web-app-infra"
+        - "common-services"
+    defaults:
+      region: us-west-2
+      replicas: 1
+      logLevel: debug
+    policies:
+      requireApproval: "false"
+
+  development:
+    selectors:
+      components:
+        - "*"
+    defaults:
+      region: us-east-1
+      replicas: 1
+      logLevel: debug
+    policies:
+      requireApproval: "false"
+
+components:
+  - name: web-app
+    type: helm
+    domain: platform
+    enabled: true
+    inputs:
+      version: "1.0.0"
+      replicaCount: 2
+      chart: oci://mycompany.azurecr.io/helm/charts/default
+      imagePullPolicy: IfNotPresent
+    labels:
+      team: platform
+      tier: frontend
+    dependsOn:
+      - component: common-services
+        environment: ""
+        scope: same-environment
+        condition: success
+
+  - name: web-app-infra
+    type: terraform
+    domain: platform
+    enabled: true
+    inputs:
+      workspace: prod-infrastructure
+      environment: production-only
+      autoApprove: "false"
+      backend: s3
+    labels:
+      team: platform
+      tier: infrastructure
+    dependsOn:
+      - component: common-services
+        environment: ""
+        scope: same-environment
+        condition: success
+
+  - name: common-services
+    type: helmCommon
+    enabled: true
+    inputs:
+      name: common-services
+      replicas: 1
+      chart: oci://mycompany.azurecr.io/helm/charts/common
+      imagePullPolicy: IfNotPresent
+    labels:
+      team: platform
+      tier: backend
+    dependsOn: []
+
+  - name: component-charts
+    type: charts
+    enabled: true
+    inputs:
+      registry: mycompany.azurecr.io/helm/charts
+      pullPolicy: Always
+    labels:
+      team: platform
+      tier: utility
+    dependsOn:
+      - component: common-services
+        environment: ""
+        scope: same-environment
+        condition: success
