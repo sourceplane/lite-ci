@@ -1,0 +1,28 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: Charts Component Type
+description: Schema for Helm chart packaging components
+type: object
+required:
+  - name
+  - type
+  - inputs
+properties:
+  name:
+    type: string
+    description: Component name
+  type:
+    type: string
+    const: charts
+    description: Component type identifier
+  inputs:
+    type: object
+    description: Chart packaging input values
+    properties:
+      registry:
+        type: string
+        description: Chart registry path
+      pullPolicy:
+        type: string
+        enum: [IfNotPresent, Always, Never]
+        description: Image pull policy
+    additionalProperties: true

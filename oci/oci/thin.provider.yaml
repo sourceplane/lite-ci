@@ -1,0 +1,209 @@
+apiVersion: thin.io/v1
+kind: Provider
+
+metadata:
+  name: lite-ci
+  version: v0.1.0
+  description: Provider-native CI planning engine that compiles intent into deterministic execution plans
+  homepage: https://github.com/sourceplane/lite-ci
+  maintainers:
+    - name: sourceplane-team
+      email: team@sourceplane.io
+  license: Apache-2.0
+
+distribution:
+  type: oci
+  ref: ghcr.io/sourceplane/lite-ci
+
+
+runtime:
+  default: native
+  supported:
+    - name: native
+      description: Direct binary execution (Linux, macOS, Windows)
+      tools: [direct execution]
+    - name: docker
+      description: OCI container via Docker
+      tools: [docker, docker-compose]
+      example: "docker run ghcr.io/sourceplane/lite-ci:v0.1.0"
+    - name: podman
+      description: OCI container via Podman (Docker-compatible)
+      tools: [podman, podman-compose]
+      example: "podman run ghcr.io/sourceplane/lite-ci:v0.1.0"
+    - name: containerd
+      description: OCI container via containerd
+      tools: [nerdctl, ctr]
+      example: "nerdctl run ghcr.io/sourceplane/lite-ci:v0.1.0"
+    - name: oras
+      description: OCI artifact registry (ORAS)
+      tools: [oras]
+      example: "oras pull ghcr.io/sourceplane/lite-ci:v0.1.0"
+    - name: kubernetes
+      description: OCI container in Kubernetes
+      tools: [kubectl, helm]
+      example: "kubectl run lite-ci --image=ghcr.io/sourceplane/lite-ci:v0.1.0"
+
+entrypoint:
+  executable: entrypoint
+  defaultArgs: -c "assets/config/**"
+
+platforms:
+  - os: linux
+    arch: amd64
+    binary: bin/linux/amd64/entrypoint
+  - os: linux
+    arch: arm64
+    binary: bin/linux/arm64/entrypoint
+  - os: darwin
+    arch: amd64
+    binary: bin/darwin/amd64/entrypoint
+  - os: darwin
+    arch: arm64
+    binary: bin/darwin/arm64/entrypoint
+
+layers:
+  core:
+    description: "Core provider bundle (provider config, schemas, bundled resources)"
+    includes:
+      - thin.provider.yaml
+      - assets/**
+    required: true
+  
+  binaries:
+    linux-amd64:
+      description: "Linux x86_64 binary"
+      ociRef: linux-amd64
+      platform: linux/amd64
+      optional: false
+    
+    linux-arm64:
+      description: "Linux ARM64 binary"
+      ociRef: linux-arm64
+      platform: linux/arm64
+      optional: false
+    
+    darwin-amd64:
+      description: "macOS Intel x86_64 binary"
+      ociRef: darwin-amd64
+      platform: darwin/amd64
+      optional: false
+    
+    darwin-arm64:
+      description: "macOS Apple Silicon ARM64 binary"
+      ociRef: darwin-arm64
+      platform: darwin/arm64
+      optional: false
+  
+  examples:
+    description: "Optional examples and use-case templates"
+    optional: true
+    includes:
+      - examples/**
+
+# Capability surface exposed by this provider
+capabilities:
+  plan:
+    description: Generate an execution plan from an intent specification
+    lifecycle:
+      stability: stable
+      introducedIn: v0.1.0
+
+    inputs:
+      - name: intent
+        type: path
+        required: true
+        description: Path to intent.yaml describing desired execution
+      - name: env
+        type: string
+        description: Target environment to plan for
+      - name: format
+        type: string
+        default: json
+        description: Output format for the generated plan
+      - name: config-dir
+        type: path
+        default: profiles
+        description: Directory containing profile and job definitions
+      - name: debug
+        type: boolean
+        default: false
+        description: Enable verbose planning output
+
+    outputs:
+      - name: plan
+        type: workflow
+        description: Resolved execution DAG with jobs and dependencies
+
+  validate:
+    description: Validate intent and component definitions
+    lifecycle:
+      stability: stable
+      introducedIn: v0.1.0
+
+    inputs:
+      - name: intent
+        type: path
+        required: true
+        description: Intent file to validate
+      - name: debug
+        type: boolean
+        default: false
+
+    outputs:
+      - name: report
+        type: validation-report
+        description: Errors and warnings found during validation
+
+  debug:
+    description: Trace intent processing and expansion stages
+    lifecycle:
+      stability: experimental
+      introducedIn: v0.1.0
+
+    inputs:
+      - name: intent
+        type: path
+        required: true
+
+    outputs:
+      - name: trace
+        type: object
+        description: Internal processing trace for debugging
+
+# Provider-owned static assets
+assets:
+  root: ./assets
+  contains:
+    - profiles/
+    - schemas/        # optional, provider-specific
+    - defaults/
+
+  immutability:
+    bundledWithBinary: true
+
+architecture:
+  pattern: compiler
+  stages:
+    - normalize
+    - expand
+    - plan
+    - render
+
+  principles:
+    - Provider defines execution semantics
+    - Intent expresses desired outcome
+    - Capabilities expose stable interfaces
+    - Validation rules live inside the provider
+
+models:
+  Intent:
+    files: [intent.yaml]
+    description: Declarative desired state for CI execution
+
+  ComponentModel:
+    files: [profiles/*]
+    description: Provider-defined profile and job definitions
+
+  Plan:
+    files: [plan.json, plan.yaml]
+    description: Execution-ready workflow graph

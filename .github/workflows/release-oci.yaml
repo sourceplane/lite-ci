@@ -53,11 +53,11 @@ jobs:
           mkdir -p oci/bin/darwin/amd64
           mkdir -p oci/bin/darwin/arm64
           
-          # Extract entrypoint binaries from GoReleaser OCI archives
-          tar -xzf dist/liteci_*_linux_amd64_oci.tar.gz -C oci/bin/linux/amd64/ entrypoint 2>/dev/null || true
-          tar -xzf dist/liteci_*_linux_arm64_oci.tar.gz -C oci/bin/linux/arm64/ entrypoint 2>/dev/null || true
-          tar -xzf dist/liteci_*_darwin_amd64_oci.tar.gz -C oci/bin/darwin/amd64/ entrypoint 2>/dev/null || true
-          tar -xzf dist/liteci_*_darwin_arm64_oci.tar.gz -C oci/bin/darwin/arm64/ entrypoint 2>/dev/null || true
+          # Extract entrypoint binaries from GoReleaser release archives
+          tar -xzf dist/liteci_*_linux_amd64.tar.gz -C oci/bin/linux/amd64/
+          tar -xzf dist/liteci_*_linux_arm64.tar.gz -C oci/bin/linux/arm64/
+          tar -xzf dist/liteci_*_darwin_amd64.tar.gz -C oci/bin/darwin/amd64/
+          tar -xzf dist/liteci_*_darwin_arm64.tar.gz -C oci/bin/darwin/arm64/
           
           # Copy provider resources
           cp thin.provider.yaml oci/
