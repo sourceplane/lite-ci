@@ -1,0 +1,22 @@
+package main
+
+import "github.com/spf13/cobra"
+
+var componentCmd = &cobra.Command{
+	Use:     "component [component-name]",
+	Aliases: []string{"components"},
+	Short:   "List and analyze components",
+	Long:    "List all components with their merged properties. Use 'liteci component <name>' for details.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return listComponents(args)
+	},
+}
+
+func registerComponentCommand(root *cobra.Command) {
+	root.AddCommand(componentCmd)
+
+	componentCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
+	componentCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
+	componentCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
+	componentCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
+}
