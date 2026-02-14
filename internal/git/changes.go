@@ -19,7 +19,8 @@ func NewChangeDetector(baseBranch string) *ChangeDetector {
 }
 
 // GetChangedFiles returns files that have changed since the base branch or uncommitted changes
-// Returns both modified and new files (both staged and unstaged)
+// When checking a specific branch (for MRs), combines all sources: uncommitted + branch changes
+// Returns both modified and new files (both staged and unstaged and committed but not in base branch)
 func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
 	filesMap := make(map[string]bool)
 
@@ -47,7 +48,24 @@ func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
 		}
 	}
 
-	// If we have changes from diff, return them
+	// ALWAYS check against base branch (for MR scenarios where commits are already pushed)
+	compareRef := cd.baseBranch
+	if compareRef == "" {
+		compareRef = "main"
+	}
+
+	cmd = exec.Command("git", "diff", "--name-only", compareRef)
+	output, err = cmd.Output()
+	if err == nil && len(output) > 0 {
+		files := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, f := range files {
+			if f != "" {
+				filesMap[f] = true
+			}
+		}
+	}
+
+	// Return combined set of all changes
 	if len(filesMap) > 0 {
 		var result []string
 		for f := range filesMap {
@@ -56,31 +74,7 @@ func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
 		return result, nil
 	}
 
-	// Otherwise try against base branch
-	compareRef := cd.baseBranch
-	if compareRef == "" {
-		compareRef = "main"
-	}
-
-	cmd = exec.Command("git", "diff", "--name-only", compareRef)
-	output, err = cmd.Output()
-	if err != nil {
-		return []string{}, nil
-	}
-
-	if len(output) == 0 {
-		return []string{}, nil
-	}
-
-	// Parse file list
-	files := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var result []string
-	for _, f := range files {
-		if f != "" {
-			result = append(result, f)
-		}
-	}
-	return result, nil
+	return []string{}, nil
 }
 
 // IsPathChanged checks if any files under a given path have changed
