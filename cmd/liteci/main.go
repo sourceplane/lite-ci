@@ -209,11 +209,33 @@ func generatePlan() error {
 			}
 		}
 
-		// Filter instances to only changed components
+		// Add dependencies of changed components (transitively)
+		// This ensures the planner can resolve all dependencies
+		includedComps := make(map[string]bool)
+		for comp := range changedComps {
+			includedComps[comp] = true
+		}
+		
+		// Recursively add all dependencies
+		changed := true
+		for changed {
+			changed = false
+			for comp := range includedComps {
+				compDef := normalized.Components[comp]
+				for _, dep := range compDef.DependsOn {
+					if !includedComps[dep.Component] {
+						includedComps[dep.Component] = true
+						changed = true
+					}
+				}
+			}
+		}
+
+		// Filter instances to include changed components and their dependencies
 		for envName := range instances {
 			var filtered []*model.ComponentInstance
 			for _, inst := range instances[envName] {
-				if changedComps[inst.ComponentName] {
+				if includedComps[inst.ComponentName] {
 					filtered = append(filtered, inst)
 				}
 			}
