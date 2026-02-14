@@ -49,13 +49,47 @@ func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
 	}
 
 	// ALWAYS check against base branch (for MR scenarios where commits are already pushed)
+	// Try to use the specified base branch, but handle cases where it doesn't exist locally
 	compareRef := cd.baseBranch
 	if compareRef == "" {
 		compareRef = "main"
 	}
 
+	// Try with the base branch first
 	cmd = exec.Command("git", "diff", "--name-only", compareRef)
 	output, err = cmd.Output()
+	
+	// If the branch reference fails, try with origin/baseBranch (common in CI)
+	if err != nil || len(output) == 0 {
+		cmd = exec.Command("git", "diff", "--name-only", "origin/"+compareRef)
+		output, err = cmd.Output()
+	}
+
+	// If both fail, try merge-base as last resort (works in detached HEAD state)
+	if err != nil || len(output) == 0 {
+		// Try fork-point first (best for PR scenarios)
+		cmd = exec.Command("git", "merge-base", "--fork-point", compareRef)
+		mergeBaseOutput, mergeErr := cmd.Output()
+		
+		// If fork-point fails, try regular merge-base
+		if mergeErr != nil {
+			cmd = exec.Command("git", "merge-base", "HEAD", compareRef)
+			mergeBaseOutput, mergeErr = cmd.Output()
+		}
+		
+		// Try with origin/compareRef for merge-base too
+		if mergeErr != nil {
+			cmd = exec.Command("git", "merge-base", "HEAD", "origin/"+compareRef)
+			mergeBaseOutput, mergeErr = cmd.Output()
+		}
+		
+		if mergeErr == nil && len(mergeBaseOutput) > 0 {
+			baseSha := strings.TrimSpace(string(mergeBaseOutput))
+			cmd = exec.Command("git", "diff", "--name-only", baseSha)
+			output, err = cmd.Output()
+		}
+	}
+
 	if err == nil && len(output) > 0 {
 		files := strings.Split(strings.TrimSpace(string(output)), "\n")
 		for _, f := range files {
