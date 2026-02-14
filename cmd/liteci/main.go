@@ -209,27 +209,9 @@ func generatePlan() error {
 			}
 		}
 
-		// Add dependencies of changed components (transitively)
-		// This ensures the planner can resolve all dependencies
-		includedComps := make(map[string]bool)
-		for comp := range changedComps {
-			includedComps[comp] = true
-		}
-		
-		// Recursively add all dependencies
-		changed := true
-		for changed {
-			changed = false
-			for comp := range includedComps {
-				compDef := normalized.Components[comp]
-				for _, dep := range compDef.DependsOn {
-					if !includedComps[dep.Component] {
-						includedComps[dep.Component] = true
-						changed = true
-					}
-				}
-			}
-		}
+		// Use dependency resolver to include all required dependencies
+		resolver := expand.NewDependencyResolver(normalized)
+		includedComps := resolver.ResolveComponentSet(changedComps)
 
 		// Filter instances to include changed components and their dependencies
 		for envName := range instances {
@@ -545,6 +527,76 @@ func listComponents(args []string) error {
 	// List all components (or just changed ones)
 	if len(components) == 0 {
 		fmt.Println("No components found")
+		return nil
+	}
+
+	// If --changed, use dependency resolver to show categorized components
+	if changedOnly && len(changedComps) > 0 {
+		resolver := expand.NewDependencyResolver(normalized)
+		changed, dependencies, dependents := resolver.CategorizeDependencies(changedComps)
+
+		// Create a combined map for filtering
+		includedComps := make(map[string]bool)
+		for comp := range changed {
+			includedComps[comp] = true
+		}
+		for comp := range dependencies {
+			includedComps[comp] = true
+		}
+		for comp := range dependents {
+			includedComps[comp] = true
+		}
+
+		fmt.Println("\nComponents:")
+
+		// Print changed components
+		if len(changed) > 0 {
+			fmt.Println("\n  [CHANGED]")
+			for _, comp := range components {
+				if changed[comp.Name] {
+					if longFormat {
+						printComponentDetails(comp)
+					} else {
+						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+					}
+				}
+			}
+		}
+
+		// Print dependencies
+		if len(dependencies) > 0 {
+			fmt.Println("\n  [DEPENDENCIES]")
+			for _, comp := range components {
+				if dependencies[comp.Name] {
+					if longFormat {
+						printComponentDetails(comp)
+					} else {
+						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+					}
+				}
+			}
+		}
+
+		// Print dependents
+		if len(dependents) > 0 {
+			fmt.Println("\n  [DEPENDENT SERVICES]")
+			for _, comp := range components {
+				if dependents[comp.Name] {
+					if longFormat {
+						printComponentDetails(comp)
+					} else {
+						fmt.Printf("    %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+					}
+				}
+			}
+		}
+
+		if !longFormat {
+			fmt.Println("\nRun 'liteci component <name>' for detailed information")
+		}
 		return nil
 	}
 
