@@ -19,35 +19,39 @@ func NewChangeDetector(baseBranch string) *ChangeDetector {
 }
 
 // GetChangedFiles returns files that have changed since the base branch or uncommitted changes
-// Returns both modified and new files
+// Returns both modified and new files (both staged and unstaged)
 func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
-	// First, try to get changes from unstaged modifications
+	filesMap := make(map[string]bool)
+
+	// Get unstaged modifications
 	cmd := exec.Command("git", "diff", "--name-only")
 	output, err := cmd.Output()
-	
 	if err == nil && len(output) > 0 {
-		// Parse unstaged files
 		files := strings.Split(strings.TrimSpace(string(output)), "\n")
-		var result []string
 		for _, f := range files {
 			if f != "" {
-				result = append(result, f)
+				filesMap[f] = true
 			}
 		}
-		return result, nil
 	}
 
-	// If no unstaged changes, try staged changes
+	// Also get staged changes
 	cmd = exec.Command("git", "diff", "--cached", "--name-only")
 	output, err = cmd.Output()
-	
 	if err == nil && len(output) > 0 {
 		files := strings.Split(strings.TrimSpace(string(output)), "\n")
-		var result []string
 		for _, f := range files {
 			if f != "" {
-				result = append(result, f)
+				filesMap[f] = true
 			}
+		}
+	}
+
+	// If we have changes from diff, return them
+	if len(filesMap) > 0 {
+		var result []string
+		for f := range filesMap {
+			result = append(result, f)
 		}
 		return result, nil
 	}
@@ -147,6 +151,23 @@ func (cd *ChangeDetector) IsIntentFileChanged(intentFile string) (bool, error) {
 			if file == intentPath || strings.HasSuffix(file, "/"+intentPath) || strings.HasSuffix(file, "\\"+intentPath) {
 				return true, nil
 			}
+		}
+	}
+	return false, nil
+}
+
+// IsAnyPathChanged checks if any files under any of the given paths have changed
+func (cd *ChangeDetector) IsAnyPathChanged(paths []string) (bool, error) {
+	for _, path := range paths {
+		if path == "" || path == "./" {
+			continue
+		}
+		changed, err := cd.IsPathChanged(path)
+		if err != nil {
+			return false, err
+		}
+		if changed {
+			return true, nil
 		}
 	}
 	return false, nil

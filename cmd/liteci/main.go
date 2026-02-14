@@ -184,15 +184,27 @@ func generatePlan() error {
 		changeDetector := git.NewChangeDetector(baseBranch)
 		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
 
-		// Build map of changed components
+		// Build map of changed components by checking their resolved paths
 		changedComps := make(map[string]bool)
 		for _, comp := range normalized.Components {
 			if intentChanged {
 				changedComps[comp.Name] = true
 			} else {
-				pathChanged, _ := changeDetector.IsPathChanged(comp.Path)
-				if pathChanged {
-					changedComps[comp.Name] = true
+				// Use the expanded component instances to get resolved paths
+				// Check if any instance of this component has a changed path
+				for _, envInstances := range instances {
+					for _, inst := range envInstances {
+						if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" {
+							pathChanged, _ := changeDetector.IsPathChanged(inst.Path)
+							if pathChanged {
+								changedComps[comp.Name] = true
+								break
+							}
+						}
+					}
+					if changedComps[comp.Name] {
+						break
+					}
 				}
 			}
 		}
@@ -440,6 +452,13 @@ func listComponents(args []string) error {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
+	// Analyze components first to get expanded/resolved paths
+	analyzer := expand.NewComponentAnalyzer(normalized)
+	components, err := analyzer.ListAll()
+	if err != nil {
+		return fmt.Errorf("failed to analyze components: %w", err)
+	}
+
 	// Initialize change detector if --changed flag is set
 	var changeDetector *git.ChangeDetector
 	var changedComps map[string]bool
@@ -450,16 +469,26 @@ func listComponents(args []string) error {
 		// Check intent file for changes
 		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
 
-		// For each component, check if its path folder changed
-		for _, comp := range normalized.Components {
+		// For each component, check if any resolved paths have changed
+		for _, comp := range components {
 			if intentChanged {
 				// If intent changed, all components are affected
 				changedComps[comp.Name] = true
 			} else {
-				// Check if component path changed
-				pathChanged, _ := changeDetector.IsPathChanged(comp.Path)
-				if pathChanged {
-					changedComps[comp.Name] = true
+				// Check each instance's resolved path
+				found := false
+				for _, inst := range comp.Instances {
+					if inst.Path != "" && inst.Path != "./" {
+						pathChanged, _ := changeDetector.IsPathChanged(inst.Path)
+						if pathChanged {
+							changedComps[comp.Name] = true
+							found = true
+							break
+						}
+					}
+				}
+				if found {
+					continue
 				}
 			}
 		}
@@ -468,13 +497,6 @@ func listComponents(args []string) error {
 			fmt.Println("✓ No components have changed")
 			return nil
 		}
-	}
-
-	// Analyze components
-	analyzer := expand.NewComponentAnalyzer(normalized)
-	components, err := analyzer.ListAll()
-	if err != nil {
-		return fmt.Errorf("failed to analyze components: %w", err)
 	}
 
 	// Filter by specific component if requested
