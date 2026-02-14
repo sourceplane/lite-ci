@@ -49,6 +49,7 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 			Composition: job.Composition,
 			JobRegistry: registryName,
 			Job:         job.Name, // The specific job name from the registry
+			Path:        job.Path,
 			Steps:       r.convertSteps(job.Steps),
 			DependsOn:   job.DependsOn,
 			Timeout:     job.Timeout,

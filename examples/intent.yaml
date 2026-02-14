@@ -68,6 +68,7 @@ components:
     type: helm
     domain: platform
     enabled: true
+    path: "services/web-app"
     inputs:
       version: "1.0.0"
       replicaCount: 2

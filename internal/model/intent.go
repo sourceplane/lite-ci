@@ -19,12 +19,14 @@ type Metadata struct {
 
 // Group defines ownership and policy constraints
 type Group struct {
+	Path     string                 `yaml:"path" json:"path"`
 	Policies map[string]interface{} `yaml:"policies" json:"policies"`
 	Defaults map[string]interface{} `yaml:"defaults" json:"defaults"`
 }
 
 // Environment defines environment runtime contexts
 type Environment struct {
+	Path      string                 `yaml:"path" json:"path"`
 	Selectors EnvironmentSelectors   `yaml:"selectors" json:"selectors"`
 	Defaults  map[string]interface{} `yaml:"defaults" json:"defaults"`
 	Policies  map[string]interface{} `yaml:"policies" json:"policies"`
@@ -42,6 +44,7 @@ type Component struct {
 	Type      string                 `yaml:"type" json:"type"`
 	Domain    string                 `yaml:"domain" json:"domain"`
 	Enabled   bool                   `yaml:"enabled" json:"enabled"`
+	Path      string                 `yaml:"path" json:"path"`
 	Inputs    map[string]interface{} `yaml:"inputs" json:"inputs"`
 	Labels    map[string]string      `yaml:"labels" json:"labels"`
 	DependsOn []Dependency           `yaml:"dependsOn" json:"dependsOn"`
@@ -70,6 +73,7 @@ type ComponentInstance struct {
 	Environment   string
 	Type          string
 	Domain        string
+	Path          string
 	Labels        map[string]string
 	Inputs        map[string]interface{}
 	Policies      map[string]interface{}

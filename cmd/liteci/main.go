@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sourceplane/liteci/internal/expand"
+	"github.com/sourceplane/liteci/internal/git"
 	"github.com/sourceplane/liteci/internal/loader"
 	"github.com/sourceplane/liteci/internal/model"
 	"github.com/sourceplane/liteci/internal/normalize"
@@ -27,6 +28,8 @@ var (
 	longFormat     bool
 	expandJobs     bool
 	viewPlan       string
+	changedOnly    bool
+	baseBranch     string
 )
 
 var rootCmd = &cobra.Command{
@@ -82,11 +85,22 @@ var compositionsListCmd = &cobra.Command{
 	},
 }
 
+var componentCmd = &cobra.Command{
+	Use:     "component [component-name]",
+	Aliases: []string{"components"},
+	Short:   "List and analyze components",
+	Long:    "List all components with their merged properties. Use 'liteci component <name>' for details.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return listComponents(args)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(debugCmd)
 	rootCmd.AddCommand(compositionsCmd)
+	rootCmd.AddCommand(componentCmd)
 
 	compositionsCmd.AddCommand(compositionsListCmd)
 
@@ -101,12 +115,18 @@ func init() {
 	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (optional)")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
-
+	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
+	planCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
 
 	validateCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
 	validateCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
 
 	debugCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
+
+	componentCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
+	componentCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
+	componentCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
+	componentCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 
 	compositionsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
 	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
@@ -157,6 +177,36 @@ func generatePlan() error {
 	instances, err := expander.Expand()
 	if err != nil {
 		return fmt.Errorf("failed to expand intent: %w", err)
+	}
+
+	// Filter instances if --changed flag is set
+	if changedOnly {
+		changeDetector := git.NewChangeDetector(baseBranch)
+		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
+
+		// Build map of changed components
+		changedComps := make(map[string]bool)
+		for _, comp := range normalized.Components {
+			if intentChanged {
+				changedComps[comp.Name] = true
+			} else {
+				pathChanged, _ := changeDetector.IsPathChanged(comp.Path)
+				if pathChanged {
+					changedComps[comp.Name] = true
+				}
+			}
+		}
+
+		// Filter instances to only changed components
+		for envName := range instances {
+			var filtered []*model.ComponentInstance
+			for _, inst := range instances[envName] {
+				if changedComps[inst.ComponentName] {
+					filtered = append(filtered, inst)
+				}
+			}
+			instances[envName] = filtered
+		}
 	}
 
 	if debugMode {
@@ -375,6 +425,127 @@ func listCompositions(args []string) error {
 	}
 
 	return nil
+}
+
+func listComponents(args []string) error {
+	fmt.Println("□ Loading intent...")
+	intent, err := loader.LoadIntent(intentFile)
+	if err != nil {
+		return fmt.Errorf("failed to load intent: %w", err)
+	}
+
+	fmt.Println("□ Normalizing intent...")
+	normalized, err := normalize.NormalizeIntent(intent)
+	if err != nil {
+		return fmt.Errorf("failed to normalize intent: %w", err)
+	}
+
+	// Initialize change detector if --changed flag is set
+	var changeDetector *git.ChangeDetector
+	var changedComps map[string]bool
+	if changedOnly {
+		changeDetector = git.NewChangeDetector(baseBranch)
+		changedComps = make(map[string]bool)
+
+		// Check intent file for changes
+		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
+
+		// For each component, check if its path folder changed
+		for _, comp := range normalized.Components {
+			if intentChanged {
+				// If intent changed, all components are affected
+				changedComps[comp.Name] = true
+			} else {
+				// Check if component path changed
+				pathChanged, _ := changeDetector.IsPathChanged(comp.Path)
+				if pathChanged {
+					changedComps[comp.Name] = true
+				}
+			}
+		}
+
+		if len(changedComps) == 0 {
+			fmt.Println("✓ No components have changed")
+			return nil
+		}
+	}
+
+	// Analyze components
+	analyzer := expand.NewComponentAnalyzer(normalized)
+	components, err := analyzer.ListAll()
+	if err != nil {
+		return fmt.Errorf("failed to analyze components: %w", err)
+	}
+
+	// Filter by specific component if requested
+	if len(args) > 0 {
+		componentName := args[0]
+		comp, err := analyzer.GetComponentByName(componentName)
+		if err != nil {
+			return fmt.Errorf("failed to get component: %w", err)
+		}
+
+		if comp.Type == "" {
+			return fmt.Errorf("component not found: %s", componentName)
+		}
+
+		if changedOnly && !changedComps[componentName] {
+			fmt.Printf("Component %s has not changed\n", componentName)
+			return nil
+		}
+
+		printComponentDetails(comp)
+		return nil
+	}
+
+	// List all components (or just changed ones)
+	if len(components) == 0 {
+		fmt.Println("No components found")
+		return nil
+	}
+
+	fmt.Println("\nComponents:")
+	for _, comp := range components {
+		// Skip if --changed flag and component hasn't changed
+		if changedOnly && !changedComps[comp.Name] {
+			continue
+		}
+
+		if longFormat {
+			printComponentDetails(comp)
+		} else {
+			fmt.Printf("  %s (type: %s, domain: %s, enabled: %v, environments: %d)\n",
+				comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+		}
+	}
+
+	if !longFormat {
+		fmt.Println("\nRun 'liteci component <name>' for detailed information")
+	}
+
+	return nil
+}
+
+func printComponentDetails(comp *expand.ComponentMerged) {
+	fmt.Printf("\n[Component] %s\n", comp.Name)
+	fmt.Printf("  Type:       %s\n", comp.Type)
+	fmt.Printf("  Domain:     %s\n", comp.Domain)
+	fmt.Printf("  Enabled:    %v\n", comp.Enabled)
+
+	if len(comp.Dependencies) > 0 {
+		fmt.Printf("  Dependencies: %s\n", strings.Join(comp.Dependencies, ", "))
+	}
+
+	fmt.Printf("  Instances (%d):\n", len(comp.Instances))
+	for _, inst := range comp.Instances {
+		fmt.Printf("    [%s] path=%s\n", inst.Environment, inst.Path)
+		if len(inst.Inputs) > 0 {
+			fmt.Printf("      Inputs:\n")
+			for k, v := range inst.Inputs {
+				fmt.Printf("        %s: %v\n", k, v)
+			}
+		}
+	}
 }
 
 func main() {

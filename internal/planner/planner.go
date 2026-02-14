@@ -53,6 +53,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				Component:   compInst.ComponentName,
 				Environment: envName,
 				Composition: compInst.Type,
+				Path:        compInst.Path,
 				Timeout:     jobDef.Timeout,
 				Retries:     jobDef.Retries,
 				Labels:      compInst.Labels,

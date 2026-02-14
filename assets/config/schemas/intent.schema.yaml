@@ -40,6 +40,7 @@ properties:
           additionalProperties: true
         defaults:
           type: object
+          description: Default properties for components in this group (supports template variables)
           additionalProperties: true
   environments:
     type: object
@@ -61,6 +62,7 @@ properties:
                 type: string
         defaults:
           type: object
+          description: Default properties for components in this environment (supports template variables)
           additionalProperties: true
         policies:
           type: object
@@ -85,6 +87,9 @@ properties:
         enabled:
           type: boolean
           default: true
+        path:
+          type: string
+          description: Working directory path for component execution (highest priority in override hierarchy, supports template variables)
         inputs:
           type: object
           additionalProperties: true

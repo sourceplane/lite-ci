@@ -23,6 +23,7 @@ type PlanJob struct {
 	Composition string                 `json:"composition"`
 	JobRegistry string                 `json:"jobRegistry"`          // Name of the JobRegistry used
 	Job         string                 `json:"job"`                  // Specific job from registry
+	Path        string                 `json:"path"`                // Working directory for job execution
 	Steps       []PlanStep             `json:"steps"`
 	DependsOn   []string               `json:"dependsOn"`
 	Timeout     string                 `json:"timeout"`

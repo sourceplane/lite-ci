@@ -1,6 +1,9 @@
 package expand
 
 import (
+	"regexp"
+	"strings"
+
 	"github.com/sourceplane/liteci/internal/model"
 )
 
@@ -39,7 +42,7 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				continue
 			}
 
-			// Create instance
+			// Create instance with merged properties
 			instance := &model.ComponentInstance{
 				ComponentName: compName,
 				Environment:   envName,
@@ -49,9 +52,20 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				Enabled:       comp.Enabled,
 			}
 
-			// Merge inputs and policies
-			merged := e.mergeInputs(comp, env, envName)
+			// Merge all properties (including path) with template interpolation
+			merged := e.mergeProperties(comp, env, envName, compName)
 			instance.Inputs = merged
+
+			// Extract path from merged properties if it exists
+			if pathVal, exists := merged["path"]; exists {
+				if pathStr, ok := pathVal.(string); ok {
+					instance.Path = pathStr
+					// Remove path from inputs so it's not duplicated
+					delete(merged, "path")
+				}
+			} else {
+				instance.Path = "./"
+			}
 
 			// Extract and apply policies (cannot be overridden)
 			instance.Policies = e.resolvePolicies(comp, envName)
@@ -74,37 +88,104 @@ func (e *Expander) getApplicableComponents(env model.Environment) []string {
 	return env.Selectors.Components
 }
 
-// mergeInputs applies the merge precedence order
-func (e *Expander) mergeInputs(comp model.Component, env model.Environment, envName string) map[string]interface{} {
+// mergeProperties applies the merge precedence order with proper override hierarchy
+// Override hierarchy: component > group > environment > default
+// Path is handled separately: component path > group path (from defaults) > environment path (from defaults) > default "./"
+func (e *Expander) mergeProperties(comp model.Component, env model.Environment, envName, compName string) map[string]interface{} {
 	merged := make(map[string]interface{})
 
-	// 1. Type defaults (empty for now, could come from schema)
-	// 2. Group defaults (from domain)
+	// Collect paths from each level for later use
+	var groupPath, envPath string
+
+	// 1. Environment defaults - lowest priority
+	if env.Defaults != nil {
+		for k, v := range env.Defaults {
+			// Extract path from defaults but don't add to merged yet
+			if k == "path" {
+				if pathStr, ok := v.(string); ok {
+					envPath = pathStr
+				}
+			} else {
+				merged[k] = v
+			}
+		}
+	}
+
+	// 2. Group defaults - middle priority (overwrites environment defaults)
 	if comp.Domain != "" {
 		if group, exists := e.groups[comp.Domain]; exists {
 			if group.Defaults != nil {
 				for k, v := range group.Defaults {
-					merged[k] = v
+					// Extract path from defaults but don't add to merged yet
+					if k == "path" {
+						if pathStr, ok := v.(string); ok {
+							groupPath = pathStr
+						}
+					} else {
+						merged[k] = v
+					}
 				}
 			}
 		}
 	}
 
-	// 3. Environment defaults
-	if env.Defaults != nil {
-		for k, v := range env.Defaults {
-			merged[k] = v
-		}
-	}
-
-	// 4. Component inputs (highest priority for inputs)
+	// 3. Component properties - highest priority (overwrites group and environment defaults)
 	if comp.Inputs != nil {
 		for k, v := range comp.Inputs {
 			merged[k] = v
 		}
 	}
 
-	return merged
+	// 4. Handle path with explicit override hierarchy: component > group > environment > default
+	if comp.Path != "" {
+		// Component level (highest priority)
+		merged["path"] = comp.Path
+	} else if groupPath != "" {
+		// Group level (from group defaults)
+		merged["path"] = groupPath
+	} else if envPath != "" {
+		// Environment level (from environment defaults)
+		merged["path"] = envPath
+	}
+
+	// 5. Interpolate template variables in all string values
+	return e.interpolateProperties(merged, envName, comp.Domain, compName)
+}
+
+// interpolateProperties applies template variable substitution to all string properties
+// Supported variables: {{ .environment }}, {{ .group }}, {{ .component }}
+func (e *Expander) interpolateProperties(props map[string]interface{}, envName, groupName, compName string) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for k, v := range props {
+		if str, ok := v.(string); ok {
+			result[k] = e.interpolateString(str, envName, groupName, compName)
+		} else {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// interpolateString replaces template variables in a string
+func (e *Expander) interpolateString(s, envName, groupName, compName string) string {
+	result := s
+
+	// Replace template variables
+	result = strings.ReplaceAll(result, "{{.environment}}", envName)
+	result = strings.ReplaceAll(result, "{{ .environment }}", envName)
+	result = strings.ReplaceAll(result, "{{.group}}", groupName)
+	result = strings.ReplaceAll(result, "{{ .group }}", groupName)
+	result = strings.ReplaceAll(result, "{{.component}}", compName)
+	result = strings.ReplaceAll(result, "{{ .component }}", compName)
+
+	// Clean up any remaining unresolved template syntax
+	re := regexp.MustCompile(`{{.*?}}`)
+	result = re.ReplaceAllString(result, "")
+
+	result = strings.TrimSpace(result)
+	return result
 }
 
 // resolvePolicies extracts policies that apply to this component in this environment
