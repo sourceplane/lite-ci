@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/sourceplane/liteci/internal/model"
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,16 @@ func NewRenderer() *Renderer {
 
 // RenderPlan creates a plan from job instances with JobRegistry bindings
 func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string) *model.Plan {
+	jobIDs := make([]string, 0, len(jobInstances))
+	for jobID := range jobInstances {
+		jobIDs = append(jobIDs, jobID)
+	}
+	sort.Strings(jobIDs)
+	return r.RenderPlanWithOrder(metadata, jobInstances, jobBindings, jobIDs)
+}
+
+// RenderPlanWithOrder creates a plan from job instances using a caller-specified order.
+func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string) *model.Plan {
 	plan := &model.Plan{
 		APIVersion: "sourceplane.io/v1",
 		Kind:       "Workflow",
@@ -34,7 +45,12 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 	}
 
 	// Convert job instances to plan jobs
-	for _, job := range jobInstances {
+	for _, jobID := range jobOrder {
+		job, exists := jobInstances[jobID]
+		if !exists {
+			continue
+		}
+
 		// Look up JobRegistry name from bindings
 		registryName := ""
 		if bindings, ok := jobBindings[job.Composition]; ok {

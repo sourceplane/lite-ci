@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/sourceplane/liteci/internal/expand"
 	"github.com/sourceplane/liteci/internal/git"
 	"github.com/sourceplane/liteci/internal/loader"
@@ -15,124 +13,7 @@ import (
 	"github.com/sourceplane/liteci/internal/normalize"
 	"github.com/sourceplane/liteci/internal/planner"
 	"github.com/sourceplane/liteci/internal/render"
-	"gopkg.in/yaml.v3"
 )
-
-var (
-	intentFile     string
-	configDir      string
-	outputFile     string
-	outputFormat   string
-	debugMode      bool
-	environment    string
-	longFormat     bool
-	expandJobs     bool
-	viewPlan       string
-	changedOnly    bool
-	baseBranch     string
-)
-
-var rootCmd = &cobra.Command{
-	Use:   "liteci",
-	Short: "Planner engine: Intent → Plan DAG",
-	Long:  "liteci is a schema-driven planner that compiles policy-aware intent into deterministic execution DAGs",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Global config directory override check
-		return nil
-	},
-}
-
-var planCmd = &cobra.Command{
-	Use:   "plan",
-	Short: "Generate execution plan from intent",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return generatePlan()
-	},
-}
-
-var validateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate intent and jobs YAML",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return validateFiles()
-	},
-}
-
-var debugCmd = &cobra.Command{
-	Use:   "debug",
-	Short: "Debug intent processing",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return debugIntent()
-	},
-}
-
-var compositionsCmd = &cobra.Command{
-	Use:     "compositions [composition]",
-	Aliases: []string{"composition"},
-	Short:   "Manage compositions",
-	Long:    "List and inspect available compositions. Use 'liteci compositions' to list all, or 'liteci compositions <name>' for details.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return listCompositions(args)
-	},
-}
-
-var compositionsListCmd = &cobra.Command{
-	Use:   "list [composition]",
-	Short: "List available compositions",
-	Long:  "List available compositions with descriptions and fields. Optionally specify a composition for detailed information.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return listCompositions(args)
-	},
-}
-
-var componentCmd = &cobra.Command{
-	Use:     "component [component-name]",
-	Aliases: []string{"components"},
-	Short:   "List and analyze components",
-	Long:    "List all components with their merged properties. Use 'liteci component <name>' for details.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return listComponents(args)
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(planCmd)
-	rootCmd.AddCommand(validateCmd)
-	rootCmd.AddCommand(debugCmd)
-	rootCmd.AddCommand(compositionsCmd)
-	rootCmd.AddCommand(componentCmd)
-
-	compositionsCmd.AddCommand(compositionsListCmd)
-
-	// Global flags (available to all commands)
-	rootCmd.PersistentFlags().StringVarP(&configDir, "config-dir", "c", "", "Config directory for JobRegistry definitions (use * or ** for recursive scanning)")
-	rootCmd.MarkPersistentFlagRequired("config-dir")
-
-	// Command-specific flags
-	planCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	planCmd.Flags().StringVarP(&outputFile, "output", "o", "plan.json", "Output plan file path")
-	planCmd.Flags().StringVarP(&outputFormat, "format", "f", "json", "Output format (json/yaml)")
-	planCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
-	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (optional)")
-	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
-	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
-	planCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
-
-	validateCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	validateCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug output")
-
-	debugCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-
-	componentCmd.Flags().StringVarP(&intentFile, "intent", "i", "intent.yaml", "Intent file path")
-	componentCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
-	componentCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
-	componentCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
-
-	compositionsListCmd.Flags().BoolVarP(&longFormat, "long", "l", false, "Show detailed information")
-	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
-
-	compositionsCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details")
-}
 
 func generatePlan() error {
 	fmt.Println("□ Loading intent...")
@@ -182,7 +63,11 @@ func generatePlan() error {
 	// Filter instances if --changed flag is set
 	if changedOnly {
 		changeDetector := git.NewChangeDetector(baseBranch)
-		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
+		changedSet, err := changedFilesSet(changeDetector)
+		if err != nil {
+			return fmt.Errorf("failed to detect changed files: %w", err)
+		}
+		intentChanged := isIntentPathChanged(changedSet, intentFile)
 
 		// Build map of changed components by checking their resolved paths
 		changedComps := make(map[string]bool)
@@ -195,8 +80,7 @@ func generatePlan() error {
 				for _, envInstances := range instances {
 					for _, inst := range envInstances {
 						if inst.ComponentName == comp.Name && inst.Path != "" && inst.Path != "./" {
-							pathChanged, _ := changeDetector.IsPathChanged(inst.Path)
-							if pathChanged {
+							if isPathChanged(changedSet, inst.Path) {
 								changedComps[comp.Name] = true
 								break
 							}
@@ -257,46 +141,17 @@ func generatePlan() error {
 	}
 
 	fmt.Println("□ Rendering plan...")
-	
+
 	// Build JobRegistry bindings map (model -> JobRegistry name)
-	// Find all job.yaml files recursively and extract metadata
 	jobBindings := make(map[string]string)
-	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || info.Name() != "job.yaml" {
-			return nil
+	for typeName, composition := range compositionRegistry.Types {
+		if composition.JobRegistryName != "" {
+			jobBindings[typeName] = composition.JobRegistryName
 		}
+	}
 
-		// Extract variant type from path structure (parent directory of job.yaml)
-		relPath, err := filepath.Rel(configDir, path)
-		if err != nil {
-			return nil
-		}
-
-		pathDir := filepath.Dir(relPath)
-		pathParts := strings.Split(pathDir, string(filepath.Separator))
-		if len(pathParts) < 1 {
-			return nil
-		}
-
-		typeName := pathParts[len(pathParts)-1]
-
-		// Try to read JobRegistry metadata
-		jobData, err := os.ReadFile(path)
-		if err == nil {
-			var jobRegistry map[string]interface{}
-			if err := yaml.Unmarshal(jobData, &jobRegistry); err == nil {
-				if metadata, ok := jobRegistry["metadata"].(map[string]interface{}); ok {
-					if name, ok := metadata["name"].(string); ok {
-						jobBindings[typeName] = name
-					}
-				}
-			}
-		}
-		return nil
-	})
-	
 	renderer := render.NewRenderer()
-	plan := renderer.RenderPlan(intent.Metadata, jobInstances, jobBindings)
+	plan := renderer.RenderPlanWithOrder(intent.Metadata, jobInstances, jobBindings, sorted)
 
 	if debugMode {
 		fmt.Println("\n" + renderer.DebugDump(plan))
@@ -378,7 +233,7 @@ func debugIntent() error {
 
 	fmt.Printf("Components: %d\n", len(normalized.Components))
 	for name, comp := range normalized.Components {
-		fmt.Printf("  - %s: type=%s, domain=%s, enabled=%v, deps=%d\n", 
+		fmt.Printf("  - %s: type=%s, domain=%s, enabled=%v, deps=%d\n",
 			name, comp.Type, comp.Domain, comp.Enabled, len(comp.DependsOn))
 	}
 
@@ -469,9 +324,13 @@ func listComponents(args []string) error {
 	if changedOnly {
 		changeDetector = git.NewChangeDetector(baseBranch)
 		changedComps = make(map[string]bool)
+		changedSet, err := changedFilesSet(changeDetector)
+		if err != nil {
+			return fmt.Errorf("failed to detect changed files: %w", err)
+		}
 
 		// Check intent file for changes
-		intentChanged, _ := changeDetector.IsIntentFileChanged(intentFile)
+		intentChanged := isIntentPathChanged(changedSet, intentFile)
 
 		// For each component, check if any resolved paths have changed
 		for _, comp := range components {
@@ -483,8 +342,7 @@ func listComponents(args []string) error {
 				found := false
 				for _, inst := range comp.Instances {
 					if inst.Path != "" && inst.Path != "./" {
-						pathChanged, _ := changeDetector.IsPathChanged(inst.Path)
-						if pathChanged {
+						if isPathChanged(changedSet, inst.Path) {
 							changedComps[comp.Name] = true
 							found = true
 							break
@@ -648,4 +506,60 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func changedFilesSet(detector *git.ChangeDetector) (map[string]struct{}, error) {
+	files, err := detector.GetChangedFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if file == "" {
+			continue
+		}
+		result[file] = struct{}{}
+	}
+
+	return result, nil
+}
+
+func isPathChanged(changedFiles map[string]struct{}, path string) bool {
+	if path == "" || path == "./" {
+		return len(changedFiles) > 0
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	prefix := path + "/"
+	for file := range changedFiles {
+		if file == path || strings.HasPrefix(file, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isIntentPathChanged(changedFiles map[string]struct{}, intentPath string) bool {
+	if intentPath == "" {
+		return false
+	}
+
+	base := filepathBase(intentPath)
+	for file := range changedFiles {
+		if file == intentPath || file == base || strings.HasSuffix(file, "/"+base) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func filepathBase(path string) string {
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	if len(parts) == 0 {
+		return path
+	}
+	return parts[len(parts)-1]
 }

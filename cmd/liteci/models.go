@@ -13,18 +13,18 @@ import (
 
 // ModelInfo holds extracted metadata about a model
 type ModelInfo struct {
-	Name             string
-	Title            string
-	Description      string
-	RequiredFields   []string
-	SupportedFields  map[string]string
-	JobRegistryName  string              // Name of the JobRegistry
-	JobRegistryDesc  string              // Description of the JobRegistry
-	AvailableJobs    []JobBindingInfo    // All available jobs in the registry
-	DefaultJobName   string              // Default job name
-	JobName          string              // Currently displayed job
-	JobDescription   string              // Currently displayed job description
-	Steps            []StepInfo
+	Name            string
+	Title           string
+	Description     string
+	RequiredFields  []string
+	SupportedFields map[string]string
+	JobRegistryName string           // Name of the JobRegistry
+	JobRegistryDesc string           // Description of the JobRegistry
+	AvailableJobs   []JobBindingInfo // All available jobs in the registry
+	DefaultJobName  string           // Default job name
+	JobName         string           // Currently displayed job
+	JobDescription  string           // Currently displayed job description
+	Steps           []StepInfo
 }
 
 // JobBindingInfo holds information about a job in the registry
@@ -54,25 +54,11 @@ func ExtractModelInfo(modelName string, composition *loader.Composition, configD
 		Steps:           []StepInfo{},
 	}
 
+	info.JobRegistryName = composition.JobRegistryName
+	info.JobRegistryDesc = composition.JobRegistryDesc
+
 	// Extract JobRegistry metadata
 	if len(composition.Jobs) > 0 {
-		// Try to read job.yaml to extract JobRegistry metadata
-		jobPath := filepath.Join(configDir, modelName, "job.yaml")
-		jobData, err := os.ReadFile(jobPath)
-		if err == nil {
-			var jobRegistry map[string]interface{}
-			if err := yaml.Unmarshal(jobData, &jobRegistry); err == nil {
-				if metadata, ok := jobRegistry["metadata"].(map[string]interface{}); ok {
-					if name, ok := metadata["name"].(string); ok {
-						info.JobRegistryName = name
-					}
-					if desc, ok := metadata["description"].(string); ok {
-						info.JobRegistryDesc = desc
-					}
-				}
-			}
-		}
-
 		// Build list of all available jobs from the registry
 		for i, job := range composition.Jobs {
 			scope := ""
@@ -81,7 +67,7 @@ func ExtractModelInfo(modelName string, composition *loader.Composition, configD
 					scope = s
 				}
 			}
-			
+
 			bindingInfo := JobBindingInfo{
 				Name:        job.Name,
 				Description: job.Description,
@@ -90,7 +76,7 @@ func ExtractModelInfo(modelName string, composition *loader.Composition, configD
 				Timeout:     job.Timeout,
 			}
 			info.AvailableJobs = append(info.AvailableJobs, bindingInfo)
-			
+
 			// First job is the default
 			if i == 0 {
 				info.DefaultJobName = job.Name
@@ -214,12 +200,12 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 		} else {
 			marker = "  "
 		}
-		
+
 		scope := ""
 		if job.Scope != "" {
 			scope = fmt.Sprintf(" [%s]", job.Scope)
 		}
-		
+
 		fmt.Printf("%s%d. %s%s\n", marker, i+1, job.Name, scope)
 		fmt.Printf("     Description: %s\n", job.Description)
 		fmt.Printf("     Steps: %d | Timeout: %s\n", job.Steps, job.Timeout)
@@ -253,7 +239,7 @@ func PrintLongFormat(info *ModelInfo, expandJobs bool) {
 	// Supported input fields
 	if len(info.SupportedFields) > 0 {
 		fmt.Printf("Supported Input Fields:\n")
-		
+
 		// Sort fields for consistent output
 		fieldNames := make([]string, 0, len(info.SupportedFields))
 		for name := range info.SupportedFields {

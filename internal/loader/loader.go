@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
@@ -60,17 +61,19 @@ func LoadJSONSchema(path string) (interface{}, error) {
 
 // Composition holds a composition's job definitions and schema
 type Composition struct {
-	Name     string
-	Jobs     []model.JobSpec           // All jobs for this component type
-	JobMap   map[string]*model.JobSpec // Quick lookup by job name
-	Schema   *jsonschema.Schema
-	Bindings *model.JobBinding // Optional job binding declaration
+	Name            string
+	Jobs            []model.JobSpec           // All jobs for this component type
+	JobMap          map[string]*model.JobSpec // Quick lookup by job name
+	Schema          *jsonschema.Schema
+	Bindings        *model.JobBinding // Optional job binding declaration
+	JobRegistryName string
+	JobRegistryDesc string
 }
 
 // CompositionRegistry holds all loaded compositions
 type CompositionRegistry struct {
 	Types    map[string]*Composition
-	Jobs     *model.JobRegistry // For backward compatibility
+	Jobs     *model.JobRegistry           // For backward compatibility
 	Bindings map[string]*model.JobBinding // Model -> JobBinding mapping
 }
 
@@ -79,6 +82,7 @@ type CompositionRegistry struct {
 //   - Exact path: Non-recursive, looks for job.yaml and schema.yaml in immediate subdirectories
 //   - Path with *: Recursive glob pattern (single level)
 //   - Path with **: Recursive glob pattern (multiple levels)
+//
 // Example paths:
 //   - "runtime/config/compositions" - non-recursive: looks in {charts,helm,etc}/
 //   - "runtime/config/*" - recursive: looks in all subdirectories
@@ -122,7 +126,7 @@ func LoadCompositionsFromDir(configDir string) (*CompositionRegistry, error) {
 	}
 
 	// Maps to track job.yaml -> schema.yaml pairs
-	jobFiles := make(map[string]string)   // job.yaml path -> variant type
+	jobFiles := make(map[string]string)    // job.yaml path -> variant type
 	schemaFiles := make(map[string]string) // variant type -> schema.yaml path
 
 	// Process each search path
@@ -193,8 +197,15 @@ func LoadCompositionsFromDir(configDir string) (*CompositionRegistry, error) {
 		return nil, fmt.Errorf("no job.yaml files found in config path: %s", configDir)
 	}
 
-	// Process each job.yaml and match with its schema.yaml
-	for jobPath, typeName := range jobFiles {
+	// Process each job.yaml and match with its schema.yaml in sorted order for determinism
+	jobPaths := make([]string, 0, len(jobFiles))
+	for p := range jobFiles {
+		jobPaths = append(jobPaths, p)
+	}
+	sort.Strings(jobPaths)
+
+	for _, jobPath := range jobPaths {
+		typeName := jobFiles[jobPath]
 		schemaPath, schemaExists := schemaFiles[typeName]
 		if !schemaExists {
 			return nil, fmt.Errorf("missing schema.yaml for job registry type %s (job at %s)", typeName, jobPath)
@@ -252,10 +263,12 @@ func LoadCompositionsFromDir(configDir string) (*CompositionRegistry, error) {
 
 		// Store in registry with job map for quick lookup
 		composition := &Composition{
-			Name:   typeName,
-			Jobs:   jobRegistry.Jobs,
-			JobMap: make(map[string]*model.JobSpec),
-			Schema: schema,
+			Name:            typeName,
+			Jobs:            jobRegistry.Jobs,
+			JobMap:          make(map[string]*model.JobSpec),
+			Schema:          schema,
+			JobRegistryName: jobRegistry.Metadata.Name,
+			JobRegistryDesc: jobRegistry.Metadata.Description,
 		}
 
 		// Build job map for quick lookup by name

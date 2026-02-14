@@ -1,12 +1,14 @@
 package expand
 
 import (
+	"sort"
+
 	"github.com/sourceplane/liteci/internal/model"
 )
 
 // ComponentAnalyzer provides analysis of components and their resolved properties
 type ComponentAnalyzer struct {
-	expander *Expander
+	expander  *Expander
 	instances map[string][]*model.ComponentInstance
 }
 
@@ -20,7 +22,17 @@ func NewComponentAnalyzer(normalized *model.NormalizedIntent) *ComponentAnalyzer
 
 // AnalyzeAll expands all components and returns merged instances
 func (ca *ComponentAnalyzer) AnalyzeAll() (map[string][]*model.ComponentInstance, error) {
-	return ca.expander.Expand()
+	if ca.instances != nil {
+		return ca.instances, nil
+	}
+
+	instances, err := ca.expander.Expand()
+	if err != nil {
+		return nil, err
+	}
+
+	ca.instances = instances
+	return ca.instances, nil
 }
 
 // GetComponent returns merged component data for a specific component across all environments
@@ -46,6 +58,8 @@ func (ca *ComponentAnalyzer) GetComponentByName(compName string) (*ComponentMerg
 		Dependencies: make([]string, 0),
 	}
 
+	depSet := make(map[string]bool)
+
 	// Collect all instances of this component across environments
 	for _, envInstances := range instances {
 		for _, inst := range envInstances {
@@ -55,15 +69,22 @@ func (ca *ComponentAnalyzer) GetComponentByName(compName string) (*ComponentMerg
 					comp.Type = inst.Type
 					comp.Domain = inst.Domain
 					comp.Enabled = inst.Enabled
+				}
 
-					// Collect dependencies
-					for _, dep := range inst.DependsOn {
-						comp.Dependencies = append(comp.Dependencies, dep.ComponentName)
-					}
+				for _, dep := range inst.DependsOn {
+					depSet[dep.ComponentName] = true
 				}
 				comp.Instances = append(comp.Instances, inst)
 			}
 		}
+	}
+
+	if len(depSet) > 0 {
+		comp.Dependencies = make([]string, 0, len(depSet))
+		for dep := range depSet {
+			comp.Dependencies = append(comp.Dependencies, dep)
+		}
+		sort.Strings(comp.Dependencies)
 	}
 
 	return comp, nil
@@ -76,19 +97,51 @@ func (ca *ComponentAnalyzer) ListAll() ([]*ComponentMerged, error) {
 		return nil, err
 	}
 
-	seen := make(map[string]bool)
-	var result []*ComponentMerged
+	byName := make(map[string]*ComponentMerged)
 
-	// Collect unique component names
+	// Build merged result in a single pass
 	for _, envInstances := range instances {
 		for _, inst := range envInstances {
-			if !seen[inst.ComponentName] {
-				seen[inst.ComponentName] = true
-				comp, _ := ca.GetComponentByName(inst.ComponentName)
-				result = append(result, comp)
+			comp, exists := byName[inst.ComponentName]
+			if !exists {
+				comp = &ComponentMerged{
+					Name:         inst.ComponentName,
+					Type:         inst.Type,
+					Domain:       inst.Domain,
+					Enabled:      inst.Enabled,
+					Instances:    make([]*model.ComponentInstance, 0),
+					Dependencies: make([]string, 0),
+				}
+				byName[inst.ComponentName] = comp
+			}
+
+			comp.Instances = append(comp.Instances, inst)
+			for _, dep := range inst.DependsOn {
+				if !contains(comp.Dependencies, dep.ComponentName) {
+					comp.Dependencies = append(comp.Dependencies, dep.ComponentName)
+				}
 			}
 		}
 	}
 
+	result := make([]*ComponentMerged, 0, len(byName))
+	for _, comp := range byName {
+		sort.Strings(comp.Dependencies)
+		result = append(result, comp)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+
 	return result, nil
+}
+
+func contains(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

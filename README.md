@@ -92,6 +92,9 @@ tar -xzf liteci_v0.1.2_linux_amd64_oci.tar.gz
 
 ## Architecture
 
+- Core overview: [docs/CORE-ARCHITECTURE.md](docs/CORE-ARCHITECTURE.md)
+- Detailed design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ### 6-Stage Compiler Pipeline
 
 1. **Load & Validate** - Parse YAML, validate against JSON schemas
@@ -455,6 +458,15 @@ liteci plan \
   --output plan.json \
   --format json \
   --debug
+
+# Preview execution from a compiled plan (dry-run)
+liteci run \
+  --plan plan.json
+
+# Execute plan steps
+liteci run \
+  --plan plan.json \
+  --execute
 ```
 
 **Flags:**
@@ -463,6 +475,8 @@ liteci plan \
 - `-o, --output` - Output plan file (default: plan.json)
 - `-f, --format` - Output format: json or yaml (default: json)
 - `--debug` - Enable verbose logging
+- `-p, --plan` - Path to compiled plan file for `run`
+- `-x, --execute` - Execute commands (without this, `run` is dry-run)
 
 ## Troubleshooting
 
