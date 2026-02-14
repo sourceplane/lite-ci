@@ -1,114 +1,172 @@
 package git
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 // ChangeDetector detects files that have changed in git
 type ChangeDetector struct {
-	baseBranch string // branch to compare against (e.g., "main", "develop")
+	options ChangeOptions
+}
+
+// ChangeOptions defines Nx-style criteria for selecting changed files.
+// Priority follows Nx semantics:
+// 1) files
+// 2) uncommitted
+// 3) untracked
+// 4) base + head
+// 5) base only (committed + uncommitted + untracked)
+// 6) default base (main) + current workspace changes
+type ChangeOptions struct {
+	Base        string
+	Head        string
+	Files       []string
+	Uncommitted bool
+	Untracked   bool
 }
 
 // NewChangeDetector creates a new change detector
 func NewChangeDetector(baseBranch string) *ChangeDetector {
+	return NewChangeDetectorWithOptions(ChangeOptions{Base: baseBranch})
+}
+
+// NewChangeDetectorWithOptions creates a new change detector with explicit options.
+func NewChangeDetectorWithOptions(options ChangeOptions) *ChangeDetector {
 	return &ChangeDetector{
-		baseBranch: baseBranch,
+		options: options,
 	}
 }
 
-// GetChangedFiles returns files that have changed since the base branch or uncommitted changes
-// When checking a specific branch (for MRs), combines all sources: uncommitted + branch changes
-// Returns both modified and new files (both staged and unstaged and committed but not in base branch)
+// GetChangedFiles returns files based on Nx-style affected resolution.
 func (cd *ChangeDetector) GetChangedFiles() ([]string, error) {
-	filesMap := make(map[string]bool)
+	options := cd.options
 
-	// Get unstaged modifications
-	cmd := exec.Command("git", "diff", "--name-only")
-	output, err := cmd.Output()
-	if err == nil && len(output) > 0 {
-		files := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, f := range files {
-			if f != "" {
-				filesMap[f] = true
-			}
-		}
+	if len(options.Files) > 0 {
+		return normalizeFiles(options.Files), nil
 	}
 
-	// Also get staged changes
-	cmd = exec.Command("git", "diff", "--cached", "--name-only")
-	output, err = cmd.Output()
-	if err == nil && len(output) > 0 {
-		files := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, f := range files {
-			if f != "" {
-				filesMap[f] = true
-			}
-		}
+	if options.Uncommitted {
+		return normalizeFiles(getUncommittedFiles()), nil
 	}
 
-	// ALWAYS check against base branch (for MR scenarios where commits are already pushed)
-	// Try to use the specified base branch, but handle cases where it doesn't exist locally
-	compareRef := cd.baseBranch
-	if compareRef == "" {
-		compareRef = "main"
+	if options.Untracked {
+		return normalizeFiles(getUntrackedFiles()), nil
 	}
 
-	// Try with the base branch first
-	cmd = exec.Command("git", "diff", "--name-only", compareRef)
-	output, err = cmd.Output()
-	
-	// If the branch reference fails, try with origin/baseBranch (common in CI)
-	if err != nil || len(output) == 0 {
-		cmd = exec.Command("git", "diff", "--name-only", "origin/"+compareRef)
-		output, err = cmd.Output()
+	base := options.Base
+	head := options.Head
+
+	if base == "" {
+		base = "main"
 	}
 
-	// If both fail, try merge-base as last resort (works in detached HEAD state)
-	if err != nil || len(output) == 0 {
-		// Try fork-point first (best for PR scenarios)
-		cmd = exec.Command("git", "merge-base", "--fork-point", compareRef)
-		mergeBaseOutput, mergeErr := cmd.Output()
-		
-		// If fork-point fails, try regular merge-base
-		if mergeErr != nil {
-			cmd = exec.Command("git", "merge-base", "HEAD", compareRef)
-			mergeBaseOutput, mergeErr = cmd.Output()
-		}
-		
-		// Try with origin/compareRef for merge-base too
-		if mergeErr != nil {
-			cmd = exec.Command("git", "merge-base", "HEAD", "origin/"+compareRef)
-			mergeBaseOutput, mergeErr = cmd.Output()
-		}
-		
-		if mergeErr == nil && len(mergeBaseOutput) > 0 {
-			baseSha := strings.TrimSpace(string(mergeBaseOutput))
-			cmd = exec.Command("git", "diff", "--name-only", baseSha)
-			output, err = cmd.Output()
-		}
+	if base != "" && head != "" {
+		return normalizeFiles(getFilesUsingBaseAndHead(base, head)), nil
 	}
 
-	if err == nil && len(output) > 0 {
-		files := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, f := range files {
-			if f != "" {
-				filesMap[f] = true
-			}
-		}
-	}
-
-	// Return combined set of all changes
-	if len(filesMap) > 0 {
-		var result []string
-		for f := range filesMap {
-			result = append(result, f)
-		}
-		return result, nil
+	if base != "" {
+		files := append([]string{}, getFilesUsingBaseAndHead(base, "HEAD")...)
+		files = append(files, getUncommittedFiles()...)
+		files = append(files, getUntrackedFiles()...)
+		return normalizeFiles(files), nil
 	}
 
 	return []string{}, nil
+}
+
+func getUncommittedFiles() []string {
+	unstaged := parseGitOutput("diff", "--name-only", "--no-renames", "--relative", "HEAD", ".")
+	staged := parseGitOutput("diff", "--cached", "--name-only", "--no-renames", "--relative")
+	return append(unstaged, staged...)
+}
+
+func getUntrackedFiles() []string {
+	return parseGitOutput("ls-files", "--others", "--exclude-standard")
+}
+
+func getMergeBase(base string, head string) string {
+	mergeBase := strings.TrimSpace(runGitOutput("merge-base", base, head))
+	if mergeBase != "" {
+		return mergeBase
+	}
+
+	forkPoint := strings.TrimSpace(runGitOutput("merge-base", "--fork-point", base, head))
+	if forkPoint != "" {
+		return forkPoint
+	}
+
+	// Try origin/base as a fallback in CI where local branch is unavailable.
+	if !strings.HasPrefix(base, "origin/") {
+		originBase := "origin/" + base
+		mergeBase = strings.TrimSpace(runGitOutput("merge-base", originBase, head))
+		if mergeBase != "" {
+			return mergeBase
+		}
+		forkPoint = strings.TrimSpace(runGitOutput("merge-base", "--fork-point", originBase, head))
+		if forkPoint != "" {
+			return forkPoint
+		}
+	}
+
+	return base
+}
+
+func getFilesUsingBaseAndHead(base string, head string) []string {
+	resolvedBase := getMergeBase(base, head)
+	if resolvedBase == "" {
+		resolvedBase = base
+	}
+	return parseGitOutput("diff", "--name-only", "--no-renames", "--relative", resolvedBase, head)
+}
+
+func parseGitOutput(args ...string) []string {
+	output := runGitOutput(args...)
+	if strings.TrimSpace(output) == "" {
+		return []string{}
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+
+	return result
+}
+
+func runGitOutput(args ...string) string {
+	cmd := exec.Command("git", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(output)
+}
+
+func normalizeFiles(files []string) []string {
+	set := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		set[file] = struct{}{}
+	}
+
+	result := make([]string, 0, len(set))
+	for file := range set {
+		result = append(result, file)
+	}
+	sort.Strings(result)
+
+	return result
 }
 
 // IsPathChanged checks if any files under a given path have changed
@@ -199,4 +257,28 @@ func (cd *ChangeDetector) IsAnyPathChanged(paths []string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// ValidateOptions validates affected-like option combinations.
+func ValidateOptions(options ChangeOptions) error {
+	if len(options.Files) > 0 {
+		if options.Uncommitted || options.Untracked || options.Base != "" || options.Head != "" {
+			return fmt.Errorf("--files conflicts with --uncommitted, --untracked, --base, and --head")
+		}
+		return nil
+	}
+
+	if options.Uncommitted && (options.Untracked || options.Base != "" || options.Head != "") {
+		return fmt.Errorf("--uncommitted conflicts with --untracked, --base, and --head")
+	}
+
+	if options.Untracked && (options.Uncommitted || options.Base != "" || options.Head != "") {
+		return fmt.Errorf("--untracked conflicts with --uncommitted, --base, and --head")
+	}
+
+	if options.Head != "" && options.Base == "" {
+		return fmt.Errorf("--head requires --base")
+	}
+
+	return nil
 }

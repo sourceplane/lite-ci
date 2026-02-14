@@ -20,6 +20,9 @@ func registerPlanCommand(root *cobra.Command) {
 	planCmd.Flags().StringVarP(&environment, "env", "e", "", "Filter by environment (optional)")
 	planCmd.Flags().StringVarP(&viewPlan, "view", "v", "", "View plan (dag/dependencies/component=NAME)")
 	planCmd.Flags().BoolVar(&changedOnly, "changed", false, "Show only changed components (requires git)")
-	planCmd.Flags().StringVar(&baseBranch, "base", "main", "Base branch for change detection (default: main)")
-	planCmd.MarkFlagRequired("config-dir")
+	planCmd.Flags().StringVar(&baseBranch, "base", "", "Base ref for changed detection (default: main)")
+	planCmd.Flags().StringVar(&headRef, "head", "", "Head ref for changed detection (usually HEAD)")
+	planCmd.Flags().StringSliceVar(&changedFiles, "files", nil, "Comma-separated changed files (overrides git diff calculation)")
+	planCmd.Flags().BoolVar(&uncommitted, "uncommitted", false, "Use only uncommitted changes")
+	planCmd.Flags().BoolVar(&untracked, "untracked", false, "Use only untracked files")
 }

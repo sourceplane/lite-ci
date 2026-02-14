@@ -29,5 +29,4 @@ func registerCompositionsCommand(root *cobra.Command) {
 	compositionsListCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details (with -l)")
 
 	compositionsCmd.Flags().BoolVarP(&expandJobs, "expand-jobs", "e", false, "Show all job steps and details")
-	compositionsCmd.MarkFlagRequired("config-dir")
 }

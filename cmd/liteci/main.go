@@ -62,8 +62,12 @@ func generatePlan() error {
 
 	// Filter instances if --changed flag is set
 	if changedOnly {
-		changeDetector := git.NewChangeDetector(baseBranch)
-		changedSet, err := changedFilesSet(changeDetector)
+		changeOptions, err := buildChangeOptions()
+		if err != nil {
+			return err
+		}
+
+		changedSet, err := changedFilesSet(changeOptions)
 		if err != nil {
 			return fmt.Errorf("failed to detect changed files: %w", err)
 		}
@@ -319,12 +323,16 @@ func listComponents(args []string) error {
 	}
 
 	// Initialize change detector if --changed flag is set
-	var changeDetector *git.ChangeDetector
 	var changedComps map[string]bool
 	if changedOnly {
-		changeDetector = git.NewChangeDetector(baseBranch)
 		changedComps = make(map[string]bool)
-		changedSet, err := changedFilesSet(changeDetector)
+
+		changeOptions, err := buildChangeOptions()
+		if err != nil {
+			return err
+		}
+
+		changedSet, err := changedFilesSet(changeOptions)
 		if err != nil {
 			return fmt.Errorf("failed to detect changed files: %w", err)
 		}
@@ -508,7 +516,8 @@ func main() {
 	}
 }
 
-func changedFilesSet(detector *git.ChangeDetector) (map[string]struct{}, error) {
+func changedFilesSet(options git.ChangeOptions) (map[string]struct{}, error) {
+	detector := git.NewChangeDetectorWithOptions(options)
 	files, err := detector.GetChangedFiles()
 	if err != nil {
 		return nil, err
@@ -523,6 +532,22 @@ func changedFilesSet(detector *git.ChangeDetector) (map[string]struct{}, error) 
 	}
 
 	return result, nil
+}
+
+func buildChangeOptions() (git.ChangeOptions, error) {
+	options := git.ChangeOptions{
+		Base:        strings.TrimSpace(baseBranch),
+		Head:        strings.TrimSpace(headRef),
+		Files:       changedFiles,
+		Uncommitted: uncommitted,
+		Untracked:   untracked,
+	}
+
+	if err := git.ValidateOptions(options); err != nil {
+		return git.ChangeOptions{}, err
+	}
+
+	return options, nil
 }
 
 func isPathChanged(changedFiles map[string]struct{}, path string) bool {
