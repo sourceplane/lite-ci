@@ -50,13 +50,10 @@ type ClaudeCode struct {
 
 func (d *ClaudeCode) ID() string { return ClaudeCodeID }
 
-// Launch starts the harness and wires the stream. Non-blocking: events flow
-// on io.Events until the process exits; Proc.Wait reports the terminal error.
-func (d *ClaudeCode) Launch(ctx context.Context, b Brief, io IO) (Proc, error) {
-	bin := d.Binary
-	if bin == "" {
-		bin = "claude"
-	}
+// launchArgs assembles the harness argument list (factored for the args
+// contract test — the flag set IS driver behavior, same discipline as the
+// stream fixtures).
+func (d *ClaudeCode) launchArgs(b Brief, io IO) []string {
 	args := append([]string(nil), d.PrefixArgs...)
 	args = append(args,
 		"-p",
@@ -64,6 +61,14 @@ func (d *ClaudeCode) Launch(ctx context.Context, b Brief, io IO) (Proc, error) {
 		"--input-format", "stream-json",
 		"--include-partial-messages",
 		"--verbose",
+		// Route permission checks over the stream: with this flag the harness
+		// emits control_request{subtype:"can_use_tool"} for every gated tool
+		// and BLOCKS the call until our control_response verdict arrives — the
+		// exact wire the readStream bridge and the runtime approval loop were
+		// built for (and the fixtures record). Without it the harness resolved
+		// permissions from the sandbox's own claude config, so ask-lane tools
+		// ran ungated and no approval card ever reached a head.
+		"--permission-prompt-tool", "stdio",
 	)
 	if b.Instructions != "" {
 		args = append(args, "--append-system-prompt", b.Instructions)
@@ -74,9 +79,17 @@ func (d *ClaudeCode) Launch(ctx context.Context, b Brief, io IO) (Proc, error) {
 	if d.ResumeSession != "" {
 		args = append(args, "--resume", d.ResumeSession)
 	}
-	args = append(args, d.ExtraArgs...)
+	return append(args, d.ExtraArgs...)
+}
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+// Launch starts the harness and wires the stream. Non-blocking: events flow
+// on io.Events until the process exits; Proc.Wait reports the terminal error.
+func (d *ClaudeCode) Launch(ctx context.Context, b Brief, io IO) (Proc, error) {
+	bin := d.Binary
+	if bin == "" {
+		bin = "claude"
+	}
+	cmd := exec.CommandContext(ctx, bin, d.launchArgs(b, io)...)
 	cmd.Dir = b.Workdir
 	if len(d.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), d.Env...)
@@ -302,16 +315,27 @@ func (s *stdinWriter) writeUserText(text string) {
 }
 
 func (s *stdinWriter) writeControlResponse(v Verdict) {
-	behavior := "deny"
+	// The can_use_tool result contract (the harness validates it strictly):
+	//   {behavior: "allow", updatedInput?: object}  |  {behavior: "deny", message: string}
+	// An allow carries NO message field (the old shape put one there); a deny
+	// must always carry a non-empty message — it becomes the tool error the
+	// model reads, so an empty reason would deny without saying why.
+	var result map[string]any
 	if v.Approved {
-		behavior = "allow"
+		result = map[string]any{"behavior": "allow"}
+	} else {
+		msg := v.Reason
+		if msg == "" {
+			msg = "denied"
+		}
+		result = map[string]any{"behavior": "deny", "message": msg}
 	}
 	s.writeJSON(map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
 			"subtype":    "success",
 			"request_id": v.RequestID,
-			"response":   map[string]any{"behavior": behavior, "message": v.Reason},
+			"response":   result,
 		},
 	})
 }

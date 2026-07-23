@@ -53,8 +53,12 @@ func TestReplayReproducesTheConversation(t *testing.T) {
 		Driver:    &driver.Stub{Interactive: true},
 		Brief:     brief,
 		Inputs:    q,
-		Refs:      refs,
-		Seal:      &SealInput{RunKind: nodes.RunKindInteractive, AgentType: typeID, Principal: "usr_rahul"},
+		// The ask lane is what routes the approval to the human: with the
+		// policy now authoritative over approval requests, a zero policy
+		// would auto-deny contract_propose before usr_priya ever saw it.
+		Policy: NewToolPolicy(nodes.AgentToolPolicy{Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
+		Refs:   refs,
+		Seal:   &SealInput{RunKind: nodes.RunKindInteractive, AgentType: typeID, Principal: "usr_rahul"},
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)

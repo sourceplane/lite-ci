@@ -143,6 +143,62 @@ func TestRunLoopDeniedAndAskTools(t *testing.T) {
 	}
 }
 
+// TestRunLoopApprovalPolicyAutoResolve: with the harness routing EVERY
+// permission check to the runtime (--permission-prompt-tool stdio), the
+// policy must auto-resolve the lanes it already decided — deny-lane refused,
+// allow-lane passed — so a head only ever sees genuine ask-lane cards.
+func TestRunLoopApprovalPolicyAutoResolve(t *testing.T) {
+	ctx := context.Background()
+	store := objectstore.NewMemStore(objectstore.AlgoSHA256)
+	brief, _ := AssembleBrief(ctx, store, BriefInput{RunKind: nodes.RunKindImplementation, Task: "ORN-2"})
+
+	script := []driver.Event{
+		{Kind: driver.EventApproval, RequestID: "d1", Fields: map[string]any{"tool": "rm_rf", "requestId": "d1"}},
+		{Kind: driver.EventApproval, RequestID: "a1", Fields: map[string]any{"tool": "mcp__orun__work_get", "requestId": "a1"}},
+		{Kind: driver.EventApproval, RequestID: "q1", Fields: map[string]any{"tool": "contract_propose", "requestId": "q1"}},
+		{Kind: driver.EventDone, Fields: map[string]any{"status": "completed"}},
+	}
+	headConsulted := 0
+	res, err := Run(ctx, store, RunOptions{
+		SessionID: "as_test3",
+		Driver:    &driver.Stub{Script: script},
+		Brief:     brief,
+		Policy:    NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_get"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
+		Approve: func(e driver.Event) driver.Verdict {
+			headConsulted++
+			if e.Fields["tool"] != "contract_propose" {
+				t.Errorf("head consulted for %v — policy should have auto-resolved it", e.Fields["tool"])
+			}
+			return driver.Verdict{RequestID: e.RequestID, Approved: true, Reason: "lgtm"}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headConsulted != 1 {
+		t.Fatalf("head consulted %d times, want 1 (the ask-lane request only)", headConsulted)
+	}
+	_, body, _ := store.Get(ctx, objectstore.ObjectID(res.Segments[0]))
+	seg, _ := nodes.Decode[nodes.AgentSessionSegment](body)
+	verdicts := map[string]map[string]any{}
+	for _, e := range seg.Entries {
+		if e.Kind == nodes.SessionEventApprovalResolved {
+			if id, _ := e.Payload["requestId"].(string); id != "" {
+				verdicts[id] = e.Payload
+			}
+		}
+	}
+	if v := verdicts["d1"]; v == nil || v["approved"] != false || v["principal"] != "policy" {
+		t.Errorf("deny-lane verdict = %v, want approved=false principal=policy", v)
+	}
+	if v := verdicts["a1"]; v == nil || v["approved"] != true || v["principal"] != "policy" {
+		t.Errorf("allow-lane verdict = %v, want approved=true principal=policy", v)
+	}
+	if v := verdicts["q1"]; v == nil || v["approved"] != true {
+		t.Errorf("ask-lane verdict = %v, want approved=true (head said lgtm)", v)
+	}
+}
+
 func TestToolPolicyPrecedence(t *testing.T) {
 	p := NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_get", "catalog_*"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}})
 	cases := map[string]Decision{
