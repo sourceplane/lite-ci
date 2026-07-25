@@ -29,6 +29,7 @@ var (
 	policyRefFlag       string
 	policyAsFlag        string
 	policyEnvFlag       string
+	policyComponent     string
 	policyComponentType string
 	policyPlatformFlag  string
 	policyServesFrom    string
@@ -79,7 +80,9 @@ policies/ overlays. test and push talk to Orun Cloud.`,
 	testCmd.Flags().StringVar(&policyRefFlag, "ref", "", "The secret:// reference to test")
 	testCmd.Flags().StringVar(&policyAsFlag, "as", "", "Subject to test as (user:<id>, team:<slug>, service_principal:<id>, workflow, *authenticated)")
 	testCmd.Flags().StringVar(&policyEnvFlag, "env", "", "Environment slug (defaults to the ref's env)")
-	testCmd.Flags().StringVar(&policyComponentType, "component-type", "", "component.type fact")
+	testCmd.Flags().StringVar(&policyComponent, "component", "", "component.name fact (the component the job builds)")
+	testCmd.Flags().StringVar(&policyComponentType, "component-type", "", "")
+	_ = testCmd.Flags().MarkHidden("component-type")
 	testCmd.Flags().StringVar(&policyPlatformFlag, "platform", "local-cli", "Execution platform (local-cli, ci-oidc, service)")
 	testCmd.Flags().StringVar(&policyServesFrom, "serves-from", "", "servesFrom fact (environment, project, workspace, account)")
 	testCmd.Flags().StringVar(&policyBranchFlag, "branch", "", "trigger.branch fact")
@@ -339,8 +342,14 @@ func runPolicyTest(cmd *cobra.Command) error {
 		Subject:    subject,
 		ServesFrom: strings.TrimSpace(policyServesFrom),
 	}
+	// --component-type was retired by SE2: no resolve path could ever populate
+	// component.type, so a rule naming it tested green here and did nothing live.
+	// Fail loudly rather than silently evaluating a fact the server ignores.
 	if strings.TrimSpace(policyComponentType) != "" {
-		req.Component = &configsurface.EvalComponent{Type: strings.TrimSpace(policyComponentType)}
+		return fmt.Errorf("--component-type was retired: component.type is not a resolvable fact (no resolve path can populate it). Use --component <name>, or scope the secret to the component directly")
+	}
+	if strings.TrimSpace(policyComponent) != "" {
+		req.Component = &configsurface.EvalComponent{Name: strings.TrimSpace(policyComponent)}
 	}
 	if strings.TrimSpace(policyBranchFlag) != "" || policyDeclaredFlag {
 		req.Trigger = &configsurface.EvalTrigger{Branch: strings.TrimSpace(policyBranchFlag), Declared: policyDeclaredFlag}
