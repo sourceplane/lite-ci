@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/secretref"
+	"github.com/sourceplane/orun/internal/scoperef"
 )
 
 // resolveProfileBindings returns the composition secretBindings declared by the
@@ -126,17 +126,28 @@ func mergeBindingRefs(secretEnv map[string]string, bindings []model.ResolvedSecr
 			// Optional and unmappable: nothing to emit.
 			continue
 		}
-		ref := secretref.Ref{Workspace: workspace, Project: project, Env: env, Key: b.Key}
+		ref := scoperef.Ref{Scheme: scoperef.SchemeSecret, Workspace: workspace, Project: project, Env: env, Key: b.Key}
 		refStr := ref.String()
 		// Defensive: a malformed scope/key must not silently emit a bad ref.
-		if _, err := secretref.Parse(refStr); err != nil {
+		if _, err := scoperef.Parse(refStr); err != nil {
 			if b.Required {
 				return nil, fmt.Errorf("secretBinding %q is required but its reference is invalid: %w", b.Key, err)
 			}
 			continue
 		}
-		if existing, ok := merged[b.AsEnv]; ok && existing != refStr {
-			return nil, fmt.Errorf("secretBinding %q and secretEnv both bind %q to different references", b.Key, b.AsEnv)
+		// Compare CANONICAL forms, not raw strings: after SG1 the deprecated
+		// positional spelling and the named spelling denote the same reference,
+		// and reporting them as a conflict would break every manifest that
+		// pins a binding it also declares in secretEnv.
+		if existing, ok := merged[b.AsEnv]; ok {
+			if !sameRef(existing, refStr) {
+				return nil, fmt.Errorf("secretBinding %q and secretEnv both bind %q to different references", b.Key, b.AsEnv)
+			}
+			// They agree. Keep the AUTHORED spelling rather than overwriting it
+			// with the canonical one: plan.json is content-addressed, and a
+			// manifest that did not change must not get a new digest just
+			// because the binding path now renders references differently.
+			continue
 		}
 		merged[b.AsEnv] = refStr
 	}
@@ -145,4 +156,23 @@ func mergeBindingRefs(secretEnv map[string]string, bindings []model.ResolvedSecr
 		return nil, nil
 	}
 	return merged, nil
+}
+
+// sameRef reports whether two reference spellings denote the same reference.
+// An unparseable side falls back to exact string equality — the caller has
+// already validated the binding's own reference, and a malformed secretEnv
+// entry is reported by the expander's leak guard, not here.
+func sameRef(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ca, err := scoperef.Canonicalize(a)
+	if err != nil {
+		return false
+	}
+	cb, err := scoperef.Canonicalize(b)
+	if err != nil {
+		return false
+	}
+	return ca == cb
 }

@@ -1,0 +1,113 @@
+{
+  "$comment": [
+    "Shared scope-reference vectors (saas-scope-engine SE4).",
+    "",
+    "This file is NORMATIVE and is consumed by two implementations:",
+    "  - packages/contracts/src/scope-ref.test.ts  (TypeScript)",
+    "  - orun internal/scoperef/scoperef_test.go   (Go, byte-identical copy)",
+    "",
+    "A vector added on either side fails the other's CI until it is mirrored.",
+    "That is the mechanism that replaced hand-syncing two regexes.",
+    "",
+    "`accept` entries assert: parse(in) == ref, and render(parse(in)) == canonical.",
+    "`reject` entries assert: parse(in) fails with exactly the stated class."
+  ],
+  "accept": [
+    {
+      "why": "fully contextual — the portable form that needs no templating",
+      "in": "secret://DATABASE_URL",
+      "ref": { "scheme": "secret", "workspace": "", "project": "", "env": "", "component": "", "key": "DATABASE_URL", "version": 0 },
+      "canonical": "secret://DATABASE_URL"
+    },
+    {
+      "why": "pin one axis, inherit the rest",
+      "in": "secret://env:prod/STRIPE_KEY",
+      "ref": { "scheme": "secret", "workspace": "", "project": "", "env": "prod", "component": "", "key": "STRIPE_KEY", "version": 0 },
+      "canonical": "secret://env:prod/STRIPE_KEY"
+    },
+    {
+      "why": "component-narrowed, everything else contextual",
+      "in": "secret://component:edge-dns/CLOUDFLARE_API_TOKEN",
+      "ref": { "scheme": "secret", "workspace": "", "project": "", "env": "", "component": "edge-dns", "key": "CLOUDFLARE_API_TOKEN", "version": 0 },
+      "canonical": "secret://component:edge-dns/CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "why": "fully pinned, canonical order already",
+      "in": "secret://acme/project:api/env:prod/component:assets/CLOUDFLARE_API_TOKEN",
+      "ref": { "scheme": "secret", "workspace": "acme", "project": "api", "env": "prod", "component": "assets", "key": "CLOUDFLARE_API_TOKEN", "version": 0 },
+      "canonical": "secret://acme/project:api/env:prod/component:assets/CLOUDFLARE_API_TOKEN"
+    },
+    {
+      "why": "dimensions authored out of order canonicalize to registry order — two spellings, one content-addressed string",
+      "in": "secret://acme/component:assets/env:prod/project:api/TOKEN",
+      "ref": { "scheme": "secret", "workspace": "acme", "project": "api", "env": "prod", "component": "assets", "key": "TOKEN", "version": 0 },
+      "canonical": "secret://acme/project:api/env:prod/component:assets/TOKEN"
+    },
+    {
+      "why": "the deprecated positional 4-tuple normalizes to named segments with its meaning intact",
+      "in": "secret://acme/api/prod/DATABASE_URL",
+      "ref": { "scheme": "secret", "workspace": "acme", "project": "api", "env": "prod", "component": "", "key": "DATABASE_URL", "version": 0 },
+      "canonical": "secret://acme/project:api/env:prod/DATABASE_URL"
+    },
+    {
+      "why": "positional form with a version pin",
+      "in": "secret://acme/api/prod/DATABASE_URL@7",
+      "ref": { "scheme": "secret", "workspace": "acme", "project": "api", "env": "prod", "component": "", "key": "DATABASE_URL", "version": 7 },
+      "canonical": "secret://acme/project:api/env:prod/DATABASE_URL@7"
+    },
+    {
+      "why": "version pin on the named form",
+      "in": "secret://env:prod/STRIPE_KEY@12",
+      "ref": { "scheme": "secret", "workspace": "", "project": "", "env": "prod", "component": "", "key": "STRIPE_KEY", "version": 12 },
+      "canonical": "secret://env:prod/STRIPE_KEY@12"
+    },
+    {
+      "why": "workspace alone (a workspace-wide key, everything below contextual)",
+      "in": "secret://acme/NPM_TOKEN",
+      "ref": { "scheme": "secret", "workspace": "acme", "project": "", "env": "", "component": "", "key": "NPM_TOKEN", "version": 0 },
+      "canonical": "secret://acme/NPM_TOKEN"
+    },
+    {
+      "why": "config plane, contextual — belongs in env: and resolves at plan time",
+      "in": "config://API_BASE_URL",
+      "ref": { "scheme": "config", "workspace": "", "project": "", "env": "", "component": "", "key": "API_BASE_URL", "version": 0 },
+      "canonical": "config://API_BASE_URL"
+    },
+    {
+      "why": "config plane takes the component dimension too",
+      "in": "config://env:staging/component:web/API_BASE_URL",
+      "ref": { "scheme": "config", "workspace": "", "project": "", "env": "staging", "component": "web", "key": "API_BASE_URL", "version": 0 },
+      "canonical": "config://env:staging/component:web/API_BASE_URL"
+    },
+    {
+      "why": "flag plane parses (it has no manifest slot, but the parser must still round-trip it)",
+      "in": "flag://env:prod/checkout.new-flow",
+      "ref": { "scheme": "flag", "workspace": "", "project": "", "env": "prod", "component": "", "key": "checkout.new-flow", "version": 0 },
+      "canonical": "flag://env:prod/checkout.new-flow"
+    },
+    {
+      "why": "keys may carry dots, dashes and underscores",
+      "in": "secret://my.key-name_2",
+      "ref": { "scheme": "secret", "workspace": "", "project": "", "env": "", "component": "", "key": "my.key-name_2", "version": 0 },
+      "canonical": "secret://my.key-name_2"
+    }
+  ],
+  "reject": [
+    { "why": "no scheme", "in": "DATABASE_URL", "class": "not_a_ref" },
+    { "why": "a bare literal in a reference slot", "in": "postgres://user:pw@host/db", "class": "unknown_scheme" },
+    { "why": "unknown scheme", "in": "vault://DATABASE_URL", "class": "unknown_scheme" },
+    { "why": "a typo must never silently widen the resolved scope", "in": "secret://enviroment:prod/DB", "class": "unknown_dimension" },
+    { "why": "unknown dimension", "in": "secret://region:eu/DB", "class": "unknown_dimension" },
+    { "why": "component is not addressable on the flag plane", "in": "flag://component:web/checkout.flow", "class": "dimension_not_allowed" },
+    { "why": "a dimension may not repeat", "in": "secret://env:prod/env:staging/DB", "class": "duplicate_dimension" },
+    { "why": "two bare segments are ambiguous", "in": "secret://acme/api/DB", "class": "bad_shape" },
+    { "why": "the workspace segment must come first", "in": "secret://env:prod/acme/DB", "class": "bad_shape" },
+    { "why": "empty body", "in": "secret://", "class": "bad_shape" },
+    { "why": "key may not start with a digit", "in": "secret://1KEY", "class": "bad_key" },
+    { "why": "key may not contain a colon", "in": "secret://env:prod/BAD:KEY", "class": "bad_key" },
+    { "why": "version must be a positive integer", "in": "secret://DB@0", "class": "bad_version" },
+    { "why": "version must be numeric", "in": "secret://DB@latest", "class": "bad_version" },
+    { "why": "empty dimension value", "in": "secret://env:/DB", "class": "bad_value" },
+    { "why": "dimension value may not start with a dot", "in": "secret://env:.prod/DB", "class": "bad_value" }
+  ]
+}

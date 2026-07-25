@@ -17,10 +17,10 @@ func TestMergeBindingRefs_MapsToProjectEnvWithAsEnvDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeBindingRefs: %v", err)
 	}
-	if got["AWS_ROLE_ARN"] != "secret://acme/api/prod/AWS_ROLE_ARN" {
+	if got["AWS_ROLE_ARN"] != "secret://acme/project:api/env:prod/AWS_ROLE_ARN" {
 		t.Errorf("AsEnv default / scope mapping wrong: %q", got["AWS_ROLE_ARN"])
 	}
-	if got["TERRAFORM_TOKEN"] != "secret://acme/api/prod/TF_API_TOKEN" {
+	if got["TERRAFORM_TOKEN"] != "secret://acme/project:api/env:prod/TF_API_TOKEN" {
 		t.Errorf("AsEnv override should key by AsEnv but ref by Key: %q", got["TERRAFORM_TOKEN"])
 	}
 }
@@ -131,10 +131,10 @@ func TestPlanJobs_MapsSecretBindingsIntoPlanSecretRefs(t *testing.T) {
 		t.Fatalf("expected 2 secret refs, got %d: %+v", len(refs), refs)
 	}
 	// Renderer sorts by AsEnv.
-	if refs[0].AsEnv != "AWS_ROLE_ARN" || refs[0].Ref != "secret://acme/api/prod/AWS_ROLE_ARN" {
+	if refs[0].AsEnv != "AWS_ROLE_ARN" || refs[0].Ref != "secret://acme/project:api/env:prod/AWS_ROLE_ARN" {
 		t.Errorf("unexpected first ref: %+v", refs[0])
 	}
-	if refs[1].AsEnv != "TF_API_TOKEN" || refs[1].Ref != "secret://acme/api/prod/TF_API_TOKEN" {
+	if refs[1].AsEnv != "TF_API_TOKEN" || refs[1].Ref != "secret://acme/project:api/env:prod/TF_API_TOKEN" {
 		t.Errorf("unexpected second ref: %+v", refs[1])
 	}
 }

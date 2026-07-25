@@ -3,21 +3,28 @@ package secretref
 import "testing"
 
 func TestParseValid(t *testing.T) {
+	// The deprecated positional form still parses to the same MEANING; it now
+	// normalizes to the named spelling on read (SG1), so `canonical` differs
+	// from `in` while the parsed Ref is unchanged.
 	cases := []struct {
-		in   string
-		want Ref
+		in        string
+		want      Ref
+		canonical string
 	}{
 		{
-			in:   "secret://acme/api/prod/DATABASE_URL",
-			want: Ref{Workspace: "acme", Project: "api", Env: "prod", Key: "DATABASE_URL"},
+			in:        "secret://acme/api/prod/DATABASE_URL",
+			want:      Ref{Scheme: "secret", Workspace: "acme", Project: "api", Env: "prod", Key: "DATABASE_URL"},
+			canonical: "secret://acme/project:api/env:prod/DATABASE_URL",
 		},
 		{
-			in:   "secret://acme/api/prod/STRIPE_KEY@7",
-			want: Ref{Workspace: "acme", Project: "api", Env: "prod", Key: "STRIPE_KEY", Version: 7},
+			in:        "secret://acme/api/prod/STRIPE_KEY@7",
+			want:      Ref{Scheme: "secret", Workspace: "acme", Project: "api", Env: "prod", Key: "STRIPE_KEY", Version: 7},
+			canonical: "secret://acme/project:api/env:prod/STRIPE_KEY@7",
 		},
 		{
-			in:   "secret://acme-corp/my.repo/stage-2/a.b-c_d",
-			want: Ref{Workspace: "acme-corp", Project: "my.repo", Env: "stage-2", Key: "a.b-c_d"},
+			in:        "secret://acme-corp/my.repo/stage-2/a.b-c_d",
+			want:      Ref{Scheme: "secret", Workspace: "acme-corp", Project: "my.repo", Env: "stage-2", Key: "a.b-c_d"},
+			canonical: "secret://acme-corp/project:my.repo/env:stage-2/a.b-c_d",
 		},
 	}
 	for _, c := range cases {
@@ -28,8 +35,8 @@ func TestParseValid(t *testing.T) {
 		if got != c.want {
 			t.Errorf("Parse(%q) = %+v, want %+v", c.in, got, c.want)
 		}
-		if got.String() != c.in {
-			t.Errorf("Parse(%q).String() = %q, want round-trip", c.in, got.String())
+		if got.String() != c.canonical {
+			t.Errorf("Parse(%q).String() = %q, want %q", c.in, got.String(), c.canonical)
 		}
 	}
 }
