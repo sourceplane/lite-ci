@@ -680,10 +680,13 @@ type EvalSubject struct {
 }
 
 // EvalComponent is the what-axis of an evaluate request.
+//
+// Narrowed to Name by saas-scope-engine SE2 so the dry-run and the live resolve
+// address the SAME vocabulary. Type/Domain/labels were accepted but no resolve
+// path could populate them, so a rule naming them tested green here and did
+// nothing in production. Component targeting moves to the scope lattice in SE3.
 type EvalComponent struct {
-	Type   string `json:"type,omitempty"`
-	Domain string `json:"domain,omitempty"`
-	Name   string `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // EvalTrigger is the where/trigger-axis of an evaluate request.
