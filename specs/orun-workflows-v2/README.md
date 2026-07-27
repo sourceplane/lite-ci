@@ -37,6 +37,7 @@ of leverage: **truth → flow → scope → portability → durability → peopl
 | Decisions locked | credentials cross the boundary **only** through a declared `connections:` mapping (workflow connection name → `secret://` ref), compile-checked against the connections the workflow file declares — unmapped secrets never cross (least privilege); workflows declare **`spec.outputs`** (name → expression) and orun seals **only** declared outputs (allowlist, not firehose); later steps consume `{{ steps.<id>.outputs.<name> }}`, validated at compile time against declared names; the engine is a **plan-pinned artifact** (digest in `plan.json`, OCI-resolvable) with `ORUN_TORKFLOW_ENGINE` demoted to a dev override; `retry` gains `resume: true` (resume-from-failed-step via the engine's run store) — re-run stays the default; approval gates are a **pause sealed as a run fact**, never plan content |
 | apiVersion | `orun.io/v1` (step/hook `connections`, `outputs` consumption); `torkflow/v1` gains `spec.outputs` + the `backend` mode (torkflow-side); wire: `contract/v1` |
 | Milestone prefix | **WX** (`WX0 → WX7`) |
+| Proposed successor | `specs/orun-workflows-v3` (**proposed**, not accepted) — vendors the engine in-process because torkflow is being discontinued as a standalone product. If accepted it supersedes **§6** (engine as plan content) and reverses this epic's *"in-process engine import"* non-goal; **§7** (portability) survives unchanged. Nothing here is superseded until v3's WA0 lands with product sign-off |
 
 ## The one-paragraph thesis
 
