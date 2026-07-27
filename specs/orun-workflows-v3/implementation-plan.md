@@ -1,179 +1,181 @@
-# Implementation Plan — orun-workflows-v3 (the engine comes home)
+# Implementation Plan — orun-workflows-v3 (one language, one binary)
 
-Milestone IDs WA0–WA6. Each is one reviewable outcome, independently valuable,
-ordered so every step builds on the previous. The sequence is deliberate:
-**record the decision, vendor, add the capability, then remove the boundary** —
-removing the wire before the in-process path is proven would leave no working
-execution route.
+Milestone IDs WA0–WA7 (rev 2 renumbers rev 1's WA0–WA6). Each is one
+reviewable outcome, ordered so no milestone leaves the tree without a working
+`orun workflow run`. The spine: **record the decision → build the language →
+build the engine → build the verbs → build the wait → delete the boundary →
+open the store → prove it and archive torkflow.**
 
 ---
 
 ## WA0 — the decision record
 
-**Why first.** `orun-workflows-v2` lists *"in-process engine import"* as an
-explicit non-goal and prescribes the opposite architecture in its §6. Vendoring
-the engine while that text stands would leave the spec actively describing an
-architecture the code no longer has — which is exactly how the v1 `backend`-mode
-drift happened (the spec claimed a counterparty that did not exist for a full
-cycle).
-
 **Scope.**
-- Amend `specs/orun-workflows-v2/README.md` + `design.md`: mark §6 (engine as
-  plan content) **superseded by v3**, and annotate the non-goal with the reason
-  it was reversed — torkflow discontinued as a product, not a defect in v2.
-- State the accepted cost in writing: `contract/v1`, `backend` mode, and the
-  boundary half of outputs/resume are being retired within a cycle of shipping.
-- Confirm v2 §7 (portability) survives.
+- Amend `orun-workflows-v2`: §6 (engine as plan content) superseded; the
+  *"in-process engine import"* non-goal reversed, with the reason (torkflow
+  discontinued as a product) recorded, not implied. Confirm §7 survives.
+- Record the rev 2 format decision: `torkflow/v1` is convert-supported, never
+  authored again; the near-zero installed base is the justification and is
+  named as such.
+- State the accepted cost: `contract/v1`, `backend` mode, and the boundary
+  half of outputs/resume shipped last cycle and are being retired.
 
-**Done when.** Reading v2 and v3 in sequence tells one coherent story, and no
-document claims an architecture the code does not have.
-
-**Human help.** Product sign-off that torkflow is discontinued — the entire epic
-rests on it.
+**Done when.** v1 → v2 → v3 reads as one coherent story; no document claims an
+architecture the code does not have.
+**Human help.** Product sign-off that torkflow is discontinued — the epic's
+foundation.
 
 ---
 
-## WA1 — vendor the engine, in-process, behind the existing surface
-
-**Why now.** Everything downstream needs a working in-process engine.
+## WA1 — the language: parse, validate, digest, convert
 
 **Scope.**
-- Vendor into `orun/internal/workflow/`: `engine` (DAG scheduler, run state),
-  `expression` (goja), the workflow file model, and the built-in handlers.
-  ~1,250 non-test LOC. Add `goja` + `gojsonschema` to `go.mod`.
-- Port torkflow's engine and scheduler tests with it. The scheduler had a latent
-  data race fixed during WX1 — the race tests come across too.
-- `orun workflow run|view` execute in-process. `ORUN_TORKFLOW_ENGINE`, when set,
-  still routes to the external engine and records the digest it ran (deprecated
-  escape hatch, per design §8).
-- The file format is untouched: existing workflows and digests stay valid.
+- `kind: Workflow` (`orun.dev/v1`) model per design §2: typed `inputs:`
+  (reusing `scaffold.InputSpec`), `connections:`, `outputs:`, steps with
+  `needs`/`if`/one-verb/`with`/`poll`/`retry`/`outputs`.
+- CEL compilation (`cel-go`) for every expression position; `{{ }}`
+  interpolation lowered to CEL.
+- **`orun workflow validate` becomes real** — this closes a trap hit during
+  this epic's own research (a workflow naming a nonexistent action validated
+  cleanly): DAG well-formedness (missing/cyclic `needs`, exactly one verb per
+  step), every CEL expression compiles, every `steps.X.outputs.Y` /
+  `inputs.N` / `connections.N` reference resolves to a declared name, every
+  `action:` resolves in the registry, `with:` validates against the action's
+  input schema.
+- `orun workflow digest` over the canonical new form; `orun workflow convert`
+  implementing design §2's total mapping from `torkflow/v1`.
+- CLI symmetry with `orun new`: `orun workflow run --set k=v --values f.yaml`
+  feeding `inputs:`.
 
-**Done when.** `orun workflow run` executes a workflow with **no engine
-configured and no `actionStore` on disk**, using only built-in actions. The
-digest of an existing workflow file is unchanged from the pre-vendor value.
-
+**Done when.** The design §2 example validates; a file with an unknown action,
+an uncompilable expression, or an undeclared reference fails validation with a
+line-anchored error; `convert` round-trips every torkflow example file in the
+torkflow repo.
 **Human help.** None.
 
 ---
 
-## WA2 — one dispatch path: schema validation + connections for built-ins
-
-**Why now.** Today the built-in branch bypasses input-schema validation and
-credential resolution; both live only on the provider branch
-(`scheduler.go:208`). Once every action is built-in, that bypass becomes the
-only path — a silent loss of two guarantees. This must land **before** the
-provider branch is deleted, not after.
+## WA2 — the engine: in-process DAG execution with resume
 
 **Scope.**
-- Every built-in declares an `inputSchema`; the scheduler validates before
-  invoking, uniformly.
-- Connections resolve for built-ins exactly as for providers. The v2
-  `connections:` grant — compile-checked, mapped-only injection — applies
-  unchanged.
-- Tests: an unmapped connection is not injected; a schema-violating input fails
-  the step before the handler runs.
+- Scheduler honouring `needs` (AND-join), `if:` skips, per-step
+  retry/backoff, `continueOnError`, `maxParallelSteps`. Implementation free to
+  diverge from torkflow's (design §8) — **torkflow's scheduler, race and
+  resume tests are ported first and must pass**.
+- File-backed run state under `.orun/wfruns/<execId>/`; resume re-executes
+  only non-succeeded steps (WX6 semantics). Declared outputs evaluated at
+  completion; only declared names are sealed.
+- `orun workflow run|view` execute in-process. `ORUN_TORKFLOW_ENGINE`, if set,
+  still routes outward (deprecated, digest-recorded) — the escape hatch dies
+  in WA5, not here.
 
-**Done when.** A built-in action and a provider action are indistinguishable
-from the scheduler's contract perspective — same validation, same credential
-scoping.
-
+**Done when.** A multi-step workflow with a mid-run kill resumes re-executing
+only what had not succeeded, with no engine binary configured and no
+`actionStore` on disk.
 **Human help.** None.
 
 ---
 
-## WA3 — `core.exec`
-
-**Why now.** The capability the epic exists for; needs WA2's validation and
-credential path to be honest about its inputs.
+## WA3 — the verbs: `run:`, built-ins on one dispatch path
 
 **Scope.**
-- Implement per design §6: argv-only (never a shell), explicit `cwd` defaulting
-  to the run dir, env **allowlist** rather than inheritance, mandatory timeout
-  with a bounded default and kill-on-expiry, outputs `exitCode`/`stdout`/
-  `stderr` through the declared-outputs model, non-zero exit fails the step
-  unless an error handler is declared.
-- Tests: timeout kills the process; env not in the allowlist is absent; a
-  non-zero exit fails; stdout/stderr reach declared outputs; argv is never
-  shell-interpreted (a step whose argument contains `;` or `$(…)` passes it
-  through as a literal argument).
+- `run:` per design §6 — argv-only, `cwd` defaulting to the run dir, env
+  allowlist, mandatory bounded timeout with kill-on-expiry, `exitCode`/
+  `stdout`/`stderr` as expression-visible results.
+- Built-ins `http.request` (ported in-process with `http.bearer`), `script`
+  (goja, lazy-loaded), `sleep` — all schema-validated and connection-scoped on
+  the **single** dispatch path (design §4), closing the built-in-branch bypass
+  before it can become the only path.
+- Connections resolve exclusively through orun secrets (`secret://`,
+  mapped-only, in-memory, redacted). No file-based secret source exists.
+- Nested `workflow:` verb with compile-time cycle detection; child digest
+  folded into the parent's pin.
 
-**Done when.** A workflow step runs `orun`, `git` and `gh` and downstream steps
-consume its typed outputs.
-
-**Human help.** None.
+**Done when.** A step runs `git`/`gh`/`orun` and a downstream step consumes
+its typed outputs; a shell metacharacter in an argv element is provably
+literal; an unmapped connection provably never reaches an action.
+**Human help.** Confirmation nothing internal consumes `ai.*` (they are not
+ported).
 
 ---
 
-## WA4 — `http.request` in-process; drop `ai.*` and `demo.*`
+## WA4 — `poll:` — the wait primitive
 
-**Why now.** The last reason to keep `actionStore` alive.
+**Scope.** Design §7: re-execute the step's verb on `interval` until `until`
+is true, `timeout` expires, or a terminal error; every attempt a recorded run
+fact; resume re-enters an in-flight poll. Interacts with `retry` (retry wraps
+individual attempts; poll wraps the loop).
 
-**Scope.**
-- Port `http.request` / `http.request.auth` from the provider binary to
-  in-process Go, preserving action names, input schema and the `http.bearer`
-  connection type. Existing workflows using them keep working unchanged.
-- Drop `ai.*` and `demo.echo` (design §4). Document the rationale and the
-  migration answer for `ai.*`: use orun's agent surface.
-
-**Done when.** No shipped workflow path references an action outside the
-built-in set.
-
-**Human help.** Confirmation that no internal workflow depends on `ai.*`.
+**Done when.** "Open PR → poll checks until concluded → merge if green" runs
+as three steps with no sleep loop in user code, and survives a mid-poll kill +
+resume.
+**Human help.** None.
 
 ---
 
 ## WA5 — delete the boundary
 
-**Why now.** Only safe once WA1–WA4 have made the in-process path complete.
+**Scope.** Unchanged from rev 1, plus the file-secrets kill:
+- Delete `internal/workflowbackend` wire plumbing, `contract/v1` schemas and
+  fixtures, `EngineBackendArgs`.
+- Delete engine digest pinning / OCI engine resolution
+  (`execution.workflowEngine`, `PlanWorkflowEngine`,
+  `orun workflow engine-digest`); intent field becomes a warning no-op for one
+  minor version, then an error.
+- Delete the `exec.Command` provider protocol, `actionStore` discovery, and
+  `ORUN_TORKFLOW_ENGINE`.
+- Remove any code path that can read a `connections.yaml`/`secrets.yaml`.
 
-**Scope.**
-- Delete `internal/workflowbackend` wire plumbing: `contract/v1` schemas and
-  fixtures, request/response marshalling, `EngineBackendArgs`.
-- Delete engine digest pinning and OCI engine resolution (v2 §6):
-  `execution.workflowEngine` in intent, `PlanWorkflowEngine` in the plan model,
-  and `orun workflow engine-digest`. The engine's digest is now the orun
-  binary's.
-- Delete the `exec.Command` provider protocol and `actionStore` path discovery.
-- Retire `ORUN_TORKFLOW_ENGINE` (deprecated in WA1, removed here).
-- Migration note for anyone with `execution.workflowEngine` in an intent: it
-  becomes an ignored no-op with a warning for one minor version, then an error.
-
-**Done when.** `grep -r workflowbackend\|actionStore\|TORKFLOW_ENGINE` over
-`internal/` and `cmd/` returns nothing outside the migration warning, and
-`orun workflow run` still passes its full test suite.
-
+**Done when.** `grep -r "workflowbackend\|actionStore\|TORKFLOW_ENGINE\|secrets.yaml"`
+over `internal/ cmd/` returns only the migration warning, with the full
+workflow suite green.
 **Human help.** None.
 
 ---
 
-## WA6 — discontinue torkflow, and prove the thing it was for
+## WA6 — the store as a registry: OCI action packages
 
-**Why now.** Discontinuation is a distribution decision with possible external
-consumers; it is gated, not automatic.
+**Scope.** Design §5. Explicitly **deferrable** — nothing earlier depends on
+it; ship when the first real third-party action appears, but the design lands
+now so WA1's registry namespace does not need re-cutting.
+- Package manifest (actions, input schemas, connection types, capability
+  grants, payload type), OCI push/pull through `internal/composition`
+  fetch+lock, content-addressed cache.
+- WASM payload execution via `wazero`, host functions granted per manifest;
+  `native: true` process-payload fallback, refusable by policy.
+- Package digest materialized into `plan.json`/`provenance.lock` beside the
+  workflow digest.
+
+**Done when.** A `slack.post` action from a registry runs sandboxed with only
+its granted capabilities, its digest pinned in the plan, with zero loose
+executables on disk.
+**Human help.** Registry namespace decision (`ghcr.io/sourceplane/orun-actions/*`).
+
+---
+
+## WA7 — prove it, then archive torkflow
 
 **Scope.**
-- Audit torkflow's consumers: the GHCR package, `provider.yaml`, any kiox
-  provider pin, any repo referencing `ORUN_TORKFLOW_ENGINE`. Freeze the repo
-  (archive, final release note pointing at orun) only once that is clear.
-- **End-to-end proof** — the flow this epic was requested for: a workflow whose
-  nodes are the per-phase blueprint runs, each followed by a PR-open and a
-  verify step, driving a baseline instantiation from scaffold to verified repo.
-  This is the acceptance test for the whole epic, not a demo.
+- **The acceptance test is the flow this epic was requested for**: one
+  `orun workflow run baseline-flow.yaml` that scaffolds a baseline per phase
+  (the split blueprints), opens a PR per phase, `poll:`s CI to green, merges,
+  and ends with a verified working repo — no engine binary, no action store,
+  no undeclared process.
+- Consumer audit of torkflow (GHCR package, `provider.yaml`, kiox pins,
+  `ORUN_TORKFLOW_ENGINE` references anywhere); freeze and archive the repo
+  with a final release note pointing at orun, only once clear.
 
-**Done when.** A single `orun workflow run` creates and verifies a baseline
-repo end to end, with no engine binary, no action store, and no external
-process other than the tools the workflow explicitly invokes.
-
-**Human help.** Product sign-off on archiving torkflow; GitHub permissions to
-archive the repo.
+**Done when.** The baseline flow passes end-to-end twice — once fresh, once
+resumed from an induced mid-flow failure — and torkflow is archived.
+**Human help.** Product sign-off on archiving; GitHub permission to archive.
 
 ---
 
 ## Cross-cutting (every milestone)
 
-- **The format never changes.** Any milestone that would alter `torkflow/v1`
-  file semantics is out of scope — existing digests must stay valid throughout.
-- **No milestone leaves the tree without a working `orun workflow run`.**
-- Tests move with the code they cover; vendored packages arrive with their
-  existing suites, not re-written ones.
-- v1's law is not renegotiated: **only names are intent; values are execution.**
+- **No milestone leaves `orun workflow run` broken.**
+- Semantics are sacred, internals are not: ported torkflow tests are the
+  contract of record for scheduler behaviour.
+- Every new dependency (`cel-go`, `wazero`; `goja` becomes lazy) is justified
+  in the PR that introduces it, with binary-size delta measured.
+- The law is not renegotiated: **only names are intent; values are execution.**

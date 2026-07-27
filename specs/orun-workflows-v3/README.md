@@ -1,84 +1,82 @@
-# Spec: orun-workflows-v3 (the engine comes home)
+# Spec: orun-workflows-v3 (one language, one binary)
 
 **v1 made a workflow runnable. v2 made workflows how the platform talks. v3
-removes the second binary.** `orun-workflows` (WF0–WF7, v2.32.0) introduced the
-third execution vocabulary — `workflow:` — and `orun-workflows-v2` (WX0–WX7)
-completed it: a real wire contract with two signatures on it, scoped
-connections, declared outputs, a plan-pinned engine, portable workflows, and
-resume. That architecture works today; `orun workflow run` executes end to end
-through torkflow's `backend` mode.
+makes them speak orun.** torkflow is being discontinued as a standalone
+product; its engine comes home. But v3 is not a transplant — rev 2 of this epic
+concluded that absorbing torkflow *as-is* would import three things orun should
+not want: a second step vocabulary (`actionRef`/`outboundEdges`) alien to the
+one orun already has, a JS interpreter as the de-facto expression *contract*,
+and a filesystem store of loose executables as the extension model.
 
-v3 is not a correction of that work. It is a consequence of a **product
-decision**: torkflow is being discontinued as a standalone project. Once the
-engine is no longer a separately-maintained, separately-released product, the
-process boundary between orun and it stops being an interface and becomes
-overhead — and every mechanism built to make that boundary safe becomes
-mechanism with nothing left to protect.
+v3 instead vendors the engine's **semantics** — DAG execution, declared
+outputs, file-backed resume, the connections grant — behind orun's **own
+language**: a `kind: Workflow` whose steps use the same verbs as job templates
+and blueprint hooks (`run:` argv, `action:` + `with:`, nested `workflow:`),
+whose edges are pull-model `needs:` like every other DAG in the product, and
+whose inputs reuse the Blueprint `InputSpec` verbatim.
 
-v3 vendors the engine into orun, makes the actions orun actually needs
-**built-in**, and retires the boundary and everything that guarded it.
+## Rev 2 — what the review changed and why
 
-## The honest trade
+| Rev 1 said | Rev 2 says | Because |
+|---|---|---|
+| Add `core.exec` action | **`run:` is a step verb, not an action** | orun already spells "execute argv" three ways (job steps, hooks, now actions). A fourth spelling is vocabulary debt. One verb, everywhere |
+| Keep `torkflow/v1` byte-identical | **New `orun.dev/v1 kind: Workflow`; `orun workflow convert` for old files** | The installed base is a handful of example files. Compatibility preserved a museum; convertibility is the honest constraint. Push-edges, `actionRef`/`actionID` duplication, and un-parameterizable workflows should not be carried for zero consumers |
+| goja stays as the expression engine | **CEL for control flow; goja only inside a `script` action** | Conditions and interpolation must be side-effect-free and terminating — the property CEL was built for and Kubernetes proved. "Whatever a JS engine accepts" is not a contract |
+| Drop the actionStore, everything built-in | **Built-ins now; OCI action packages (WASM-first) as the designed extension seam** | "All built-in forever" closes the door. The modern store is not a directory — it is the registry: content-addressed, digest-locked by the same `internal/composition` machinery that already pins compositions, executed in a sandbox |
+| *(absent)* | **`poll:`/`until:` wait primitive** | Rev 1 could not express its own acceptance test. "Open PR → wait for CI green → merge" requires first-class polling, not bash sleep loops smuggled through exec |
+| *(implicit)* | **torkflow's `connections.yaml`/`secrets.yaml` files die** | Plaintext secrets on disk (a live token was found in a working copy during this review). Connections resolve exclusively through orun's secret machinery (`secret://`), per the v2 grant |
 
-> **This discards working code that shipped recently.** `contract/v1`, the
-> `backend` mode, declared outputs and resume all landed in the last cycle
-> (torkflow #8/#9/#10, orun #544 and siblings). v3 deletes most of that surface.
-> That cost is real and is not being minimised here. It is accepted because the
-> code exists to serve a boundary the org has decided not to keep, and carrying
-> a wire contract between two halves of one product is a permanent tax paid to
-> preserve an option nobody intends to exercise.
+Unchanged from rev 1: the boundary dies (`contract/v1`, `backend` mode, engine
+digest pinning, `ORUN_TORKFLOW_ENGINE`); the trade — discarding recently
+shipped boundary code — is accepted and stated, not minimised; v2 §7
+(workflows travel in OCI Stacks) survives; and the law is untouched: **only
+names are intent; values are execution.**
 
-What is **not** discarded: the workflow file format (`torkflow/v1`) is unchanged,
-so every existing workflow file and its digest stay valid. The declared-outputs
-data-flow model and resume semantics are kept — they move in-process, they do
-not disappear. v1's defining law is untouched: **only names are intent; values
-are execution.**
+## What a workflow looks like after v3
 
-## What v3 deletes
+```yaml
+apiVersion: orun.dev/v1
+kind: Workflow
+metadata:
+  name: baseline-flow
+inputs:
+  repoName: { type: string, required: true, pattern: "^[a-z][a-z0-9-]*$" }
+steps:
+  - name: scaffold
+    run: ["orun", "new", "--blueprint", "blueprints/01-foundation.yaml",
+          "--out", "{{ inputs.repoName }}", "--set", "repoName={{ inputs.repoName }}"]
+  - name: open-pr
+    needs: [scaffold]
+    run: ["gh", "pr", "create", "--fill"]
+    outputs:
+      url: "{{ stdout.trim() }}"
+  - name: wait-ci
+    needs: [open-pr]
+    action: http.request
+    with: { url: "{{ steps.open-pr.outputs.url }}/checks", method: GET }
+    poll: { interval: 30s, timeout: 20m, until: "output.status == 'completed'" }
+  - name: merge
+    needs: [wait-ci]
+    if: "steps.wait-ci.outputs.conclusion == 'success'"
+    run: ["gh", "pr", "merge", "--squash"]
+```
 
-| Deleted | Why it existed |
-|---|---|
-| `contract/v1` request/response schemas + fixtures | To version a wire between two binaries |
-| torkflow `backend` mode | The counterparty on the far side of that wire |
-| Credential marshalling across the boundary | Connections had to be serialised to reach another process |
-| Engine digest pinning, OCI engine resolution (v2 §6) | "Which engine ran this" was ambient because the engine was foreign |
-| `ORUN_TORKFLOW_ENGINE` | Pointing at a binary orun now contains |
-| `actionStore` path discovery | Loose executables resolved from the filesystem at run time |
-
-The engine's digest becomes the orun binary's own digest. There is nothing left
-to pin because there is nothing left to point at.
-
-## What v3 adds
-
-- **`core.exec`** — run an argv (no shell), with cwd, an env allowlist, a
-  timeout, and captured stdout/stderr/exit. The single missing capability that
-  today prevents a workflow from driving `orun`, `git`, `gh` or `pnpm`. This is
-  what makes workflows useful for the golden-path flows they were built for.
-- **`http.request` as a built-in**, ported from its provider binary. Pure Go;
-  there was never a reason for it to be a subprocess.
-- **A single distributable.** No action store, no loose binaries, no path
-  resolution — the operational story orun already has everywhere else.
+No engine binary. No action store on disk. No second vocabulary.
 
 ## Status
 
-Proposed. Supersedes `orun-workflows-v2` §6 (engine as plan content) and flips
-its explicit non-goal *"in-process engine import"*. That non-goal was correct
-while torkflow was a live standalone product; v3 exists because that premise
-changed. The reversal is recorded in WA0 rather than made silently — the v1/v2
-`backend`-mode drift happened precisely because code and spec diverged without a
-decision record.
+Proposed (rev 2 supersedes rev 1 in place; rev 1 was merged as #563 and its
+delta is recorded above). Supersedes `orun-workflows-v2` §6 and reverses its
+*"in-process engine import"* non-goal — recorded in WA0, with product sign-off
+on torkflow's discontinuation as the gate.
 
 ## Read order
 
-1. `design.md` — the architecture: dispatch, the built-in action set, what the
-   credential and validation story becomes without a process boundary.
-2. `implementation-plan.md` — WA0–WA6, in dependency order.
+1. `design.md` — the language, the dispatch, the store-as-registry, trust.
+2. `implementation-plan.md` — WA0–WA7 in dependency order.
 
 ## Out-of-band references
 
-- `specs/orun-workflows/` — v1, the plan-step and hook surfaces.
-- `specs/orun-workflows-v2/` — v2, the contract this epic retires. Its §7
-  (workflows travelling in OCI Stacks) is **kept** and is orthogonal to where
-  the engine lives.
-- torkflow `internal/engine`, `internal/core`, `internal/expression`,
-  `internal/executor` — the ~1,250 non-test LOC that move.
+- `specs/orun-workflows/`, `specs/orun-workflows-v2/` — v1/v2; v2 §7 is kept.
+- torkflow `origin/main` `internal/{engine,core,expression,state,dag}` — the
+  semantics and tests that move; the scheduler internals may be rewritten.
