@@ -78,7 +78,11 @@ func startInteractive(t *testing.T, sessionID string) (*Server, *agent.InputQueu
 			Driver:       &driver.Stub{Interactive: true},
 			Brief:        brief,
 			Branch:       "agent/ORN-7-x",
-			Policy:       agent.NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"catalog_affected"}, Deny: []string{"*"}}),
+			// contract_propose rides the ask lane (as in the shipped
+			// implementer type): the policy is authoritative over approval
+			// requests now, and a deny-lane /ask would be auto-refused
+			// before any head could answer it.
+			Policy: agent.NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"catalog_affected"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
 			Inputs:       q,
 			Observe:      srv.Observe,
 			ObserveDelta: srv.ObserveDelta,

@@ -167,6 +167,61 @@ func drive(t *testing.T, d Driver, b Brief, react func(Event, chan<- Message, ch
 	}
 }
 
+// TestClaudeCodeLaunchArgsRoutePermissionsToStdio pins the flag that makes
+// approval gating real: without --permission-prompt-tool stdio the harness
+// resolves permissions from the sandbox's own claude config and ask-lane
+// tools run ungated (the live all-ungated transcript).
+func TestClaudeCodeLaunchArgsRoutePermissionsToStdio(t *testing.T) {
+	d := &ClaudeCode{ExtraArgs: []string{"--model", "claude-opus-4-8"}}
+	args := d.launchArgs(Brief{Instructions: "impl"}, IO{MCPConfigPath: "/tmp/mcp.json"})
+	for i, a := range args {
+		if a == "--permission-prompt-tool" {
+			if i+1 >= len(args) || args[i+1] != "stdio" {
+				t.Fatalf("--permission-prompt-tool value = %q, want stdio", args[i+1])
+			}
+			return
+		}
+	}
+	t.Fatalf("--permission-prompt-tool stdio missing from launch args: %v", args)
+}
+
+// TestControlResponseShapes pins the can_use_tool result contract the harness
+// validates strictly: allow = {behavior} alone (no message key), deny =
+// {behavior, message} with message never empty.
+func TestControlResponseShapes(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stdinWriter{w: &buf}
+	w.writeControlResponse(Verdict{RequestID: "r1", Approved: true, Reason: "lgtm"})
+	w.writeControlResponse(Verdict{RequestID: "r2", Approved: false})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d lines, want 2", len(lines))
+	}
+	decode := func(line string) map[string]any {
+		var m struct {
+			Response struct {
+				RequestID string         `json:"request_id"`
+				Response  map[string]any `json:"response"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("bad control_response line %q: %v", line, err)
+		}
+		return m.Response.Response
+	}
+	allow := decode(lines[0])
+	if allow["behavior"] != "allow" {
+		t.Fatalf("allow behavior = %v", allow["behavior"])
+	}
+	if _, has := allow["message"]; has {
+		t.Fatalf("allow result carries a message field: %v", allow)
+	}
+	deny := decode(lines[1])
+	if deny["behavior"] != "deny" || deny["message"] != "denied" {
+		t.Fatalf("deny result = %v, want behavior=deny message=denied", deny)
+	}
+}
+
 func TestClaudeCodeMappingBasic(t *testing.T) {
 	d := fakeClaude(t, "claude-basic.ndjson")
 	c := drive(t, d, Brief{ID: "sha256:b1", Instructions: "you are the implementer", Task: "ORN-142"}, nil)

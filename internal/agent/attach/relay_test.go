@@ -432,6 +432,9 @@ func TestServeAndRemoteAttachOverRelay(t *testing.T) {
 		defer close(runDone)
 		_, _ = agent.Run(context.Background(), store, agent.RunOptions{
 			SessionID: "as_relay1", Driver: &driver.Stub{Interactive: true}, Brief: brief,
+			// Ask lane so the relayed /ask reaches the head instead of the
+			// now-authoritative policy refusing it first.
+			Policy: agent.NewToolPolicy(nodes.AgentToolPolicy{Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
 			Inputs: q, Observe: srv.Observe, ObserveDelta: srv.ObserveDelta,
 		})
 		srv.Close("terminal")

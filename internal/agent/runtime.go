@@ -305,6 +305,24 @@ func (l *runLoop) foldEvent(e driver.Event) {
 		log.Append(nodes.SessionEventToolResult, textPayload(e), e.RequestID)
 	case driver.EventApproval:
 		log.Append(nodes.SessionEventApprovalRequested, fieldsPayload(e), "")
+		// The policy is the authority over which requests deserve a human:
+		// with the harness routing EVERY permission check here (the
+		// --permission-prompt-tool stdio wire), a deny-lane tool must be
+		// refused without a card and an allow-lane tool must pass without
+		// one — only the genuine ask lane reaches a head. An unnamed
+		// request (no tool field) can't be judged and falls through.
+		if tool, _ := e.Fields["tool"].(string); tool != "" {
+			switch opts.Policy.Decide(policyToolName(tool)) {
+			case DecisionDeny:
+				l.resolveApproval(e, driver.Verdict{RequestID: e.RequestID, Approved: false,
+					Reason: fmt.Sprintf("%s denied by tool policy", tool)}, "policy")
+				return
+			case DecisionAllow:
+				l.resolveApproval(e, driver.Verdict{RequestID: e.RequestID, Approved: true,
+					Reason: "allowed by tool policy"}, "policy")
+				return
+			}
+		}
 		if opts.Inputs != nil {
 			// A head answers via InputQueue.Verdict; the request stays
 			// pending until then (or the session ends with it unresolved).
@@ -332,6 +350,20 @@ func (l *runLoop) foldEvent(e driver.Event) {
 		log.Append(nodes.SessionEventError, textPayload(e), "")
 	case driver.EventDone:
 		l.outcome = terminalOutcome(e, l.outcome)
+	}
+}
+
+// resolveApproval logs a policy-decided verdict (attributed to the deciding
+// principal, "policy" for automatic resolutions) and hands it to the driver.
+// The send blocks until the driver's pump takes it — dropping a verdict would
+// wedge the harness mid-permission — with runCtx as the only escape.
+func (l *runLoop) resolveApproval(e driver.Event, v driver.Verdict, principal string) {
+	l.log.Append(nodes.SessionEventApprovalResolved, map[string]any{
+		"requestId": e.RequestID, "approved": v.Approved, "reason": v.Reason, "principal": principal,
+	}, "")
+	select {
+	case l.approve <- v:
+	case <-l.runCtx.Done():
 	}
 }
 
