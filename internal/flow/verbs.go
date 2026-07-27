@@ -53,6 +53,14 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 			env = append(env, k+"="+v)
 		}
 	}
+	// envInherit: named host variables passed through by explicit declaration
+	// — the allowlist philosophy intact (visible in review, nothing ambient),
+	// for channels that are process-inherited by nature (SSH_AUTH_SOCK et al).
+	for _, k := range s.EnvInherit {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
 	for k, raw := range s.Env {
 		v, err := Interpolate(raw, vars)
 		if err != nil {

@@ -64,6 +64,7 @@ type Step struct {
 	Workflow        string            `yaml:"workflow,omitempty"`
 	With            map[string]any    `yaml:"with,omitempty"`
 	Env             map[string]string `yaml:"env,omitempty"`
+	EnvInherit      []string          `yaml:"envInherit,omitempty"`
 	Cwd             string            `yaml:"cwd,omitempty"`
 	Connection      string            `yaml:"connection,omitempty"`
 	Timeout         string            `yaml:"timeout,omitempty"`
@@ -196,8 +197,8 @@ func (w *Workflow) validate() error {
 		if verbs != 1 {
 			return fmt.Errorf("step %s: exactly one of run/action/workflow is required (got %d)", s.Name, verbs)
 		}
-		if s.Verb() != "run" && (len(s.Env) > 0 || s.Cwd != "") {
-			return fmt.Errorf("step %s: env/cwd apply only to run: steps", s.Name)
+		if s.Verb() != "run" && (len(s.Env) > 0 || len(s.EnvInherit) > 0 || s.Cwd != "") {
+			return fmt.Errorf("step %s: env/envInherit/cwd apply only to run: steps", s.Name)
 		}
 		if s.Verb() == "run" && len(s.With) > 0 {
 			return fmt.Errorf("step %s: with: applies only to action/workflow steps", s.Name)

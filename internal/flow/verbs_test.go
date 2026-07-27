@@ -111,3 +111,20 @@ steps:
 		t.Fatal(err)
 	}
 }
+
+func TestRunVerbEnvInherit(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+	t.Setenv("NOT_DECLARED", "x")
+	res := run(t, `apiVersion: orun.dev/v1
+kind: Workflow
+metadata: { name: x }
+steps:
+  - name: a
+    run: ["/bin/sh", "-c", "echo [$SSH_AUTH_SOCK][$NOT_DECLARED]"]
+    envInherit: [SSH_AUTH_SOCK]
+    outputs: { t: "stdout.trim()" }
+`, RunOptions{})
+	if res.Steps["a"].Outputs["t"] != "[/tmp/agent.sock][]" {
+		t.Fatalf("envInherit: %#v", res.Steps["a"].Outputs)
+	}
+}
