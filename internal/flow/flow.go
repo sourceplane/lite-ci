@@ -148,7 +148,15 @@ func Digest(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("sha256:%x", sha256.Sum256(data)), nil
+	return DigestBytes(data), nil
+}
+
+// DigestBytes is Digest over in-memory bytes. Deterministic: identical bytes
+// always yield an identical digest ("sha256:<hex>", the same shape as the
+// object store's content ids), so a workflow reference folds into a plan
+// checksum or provenance lock without folding in any runtime outcome.
+func DigestBytes(data []byte) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(data))
 }
 
 func (w *Workflow) validate() error {

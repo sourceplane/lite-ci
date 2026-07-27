@@ -11,8 +11,8 @@ import (
 
 	yaml "gopkg.in/yaml.v3"
 
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // ProvenanceRelPath is where the lock is written under the output root.
@@ -154,7 +154,7 @@ func pinHookDigests(bp *Blueprint, baseDir string) ([]ProvHook, error) {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(baseDir, h.Workflow)
 			}
-			digest, derr := workflowbackend.WorkflowDigest(path)
+			digest, derr := flow.Digest(path)
 			if derr != nil {
 				return fmt.Errorf("hook %q: workflow %q: %w", h.ID, h.Workflow, derr)
 			}

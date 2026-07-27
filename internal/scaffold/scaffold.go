@@ -8,7 +8,6 @@ import (
 	"sort"
 
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // Options drives a scaffold/instantiate run (design §3 flow).
@@ -32,11 +31,9 @@ type Options struct {
 	SourceBaseDir string
 	// RunHooks opts into executing declared hooks (design §12). Off by default:
 	// hooks run outside the sandbox, so they are opt-in per instantiation.
+	// Workflow hooks run through the in-process flow engine (orun-workflows-v3
+	// WA5) — there is no external engine to configure.
 	RunHooks bool
-	// WorkflowEngine runs `workflow:` hooks (orun-workflows Surface B). Nil-safe:
-	// when a workflow hook runs and this is nil, the engine is resolved from
-	// ORUN_TORKFLOW_ENGINE. Tests inject a fake. Unused unless RunHooks is set.
-	WorkflowEngine workflowbackend.Engine
 }
 
 // Result summarizes a completed scaffold.
@@ -178,7 +175,6 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		hr := &hookRunner{
 			outDir:  opts.OutDir,
 			baseDir: opts.SourceBaseDir,
-			engine:  opts.WorkflowEngine,
 			secrets: values.SecretMap(),
 			digests: hookDigestMap(prov),
 		}

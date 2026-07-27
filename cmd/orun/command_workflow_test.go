@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sourceplane/orun/internal/workflowbackend"
+	"github.com/sourceplane/orun/internal/flow"
 )
 
 func newCapCmd() (*cobra.Command, *bytes.Buffer) {
@@ -70,7 +70,7 @@ func TestWorkflowDigestCmd(t *testing.T) {
 	if err := workflowDigestCmd.RunE(c, []string{p}); err != nil {
 		t.Fatalf("digest: %v", err)
 	}
-	if strings.TrimSpace(buf.String()) != workflowbackend.DigestBytes([]byte(goodFlowYAML)) {
+	if strings.TrimSpace(buf.String()) != flow.DigestBytes([]byte(goodFlowYAML)) {
 		t.Fatalf("digest output mismatch: %q", buf.String())
 	}
 }

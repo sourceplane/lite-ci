@@ -122,17 +122,6 @@ type PlanExecution struct {
 type PlanSpec struct {
 	JobBindings        map[string]string           `json:"jobBindings,omitempty" yaml:"jobBindings,omitempty"` // model -> JobRegistry name mapping
 	CompositionSources []ResolvedCompositionSource `json:"compositionSources,omitempty" yaml:"compositionSources,omitempty"`
-	// WorkflowEngine is the declared engine pin materialized from
-	// intent.execution.workflowEngine (orun-workflows-v2 §6). It folds into the
-	// plan checksum; at run time the resolved engine's content digest must match
-	// or the run fails closed. "Which engine ran this" is plan content.
-	WorkflowEngine *PlanWorkflowEngine `json:"workflowEngine,omitempty" yaml:"workflowEngine,omitempty"`
-}
-
-// PlanWorkflowEngine is the in-plan workflow-engine pin.
-type PlanWorkflowEngine struct {
-	Ref    string `json:"ref,omitempty" yaml:"ref,omitempty"`
-	Digest string `json:"digest" yaml:"digest"`
 }
 
 // ResolvedCompositionSource records which sources were used to compile the plan.
@@ -218,7 +207,7 @@ type PlanStep struct {
 	Order int    `json:"order,omitempty" yaml:"order,omitempty"`
 	Run   string `json:"run,omitempty" yaml:"run,omitempty"`
 	Use   string `json:"use,omitempty" yaml:"use,omitempty"`
-	// Workflow is the torkflow workflow file this step runs (the third execution
+	// Workflow is the workflow file this step runs (the third execution
 	// vocabulary beside run/use); WorkflowDigest is the content digest pinned at
 	// compile time so the reference — never the outcome — is durable plan state
 	// (specs/orun-workflows §5/§7). Both fold into the plan checksum.

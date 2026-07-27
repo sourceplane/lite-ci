@@ -1,4 +1,4 @@
-package workflowbackend
+package flow
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// outputRefPattern matches a cross-step output reference:
+// outputRefPattern matches a cross-step output reference in a PLAN step:
 //
 //	${{ steps.<stepId>.outputs.<name> }}
 //

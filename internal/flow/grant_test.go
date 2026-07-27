@@ -1,40 +1,9 @@
-package workflowbackend
+package flow
 
 import (
 	"strings"
 	"testing"
 )
-
-const inspectFixture = `apiVersion: torkflow/v1
-kind: Workflow
-metadata: { name: n }
-spec:
-  outputs:
-    email: "{{ Steps.Get.user.email }}"
-    id: "{{ Steps.Get.user.id }}"
-  steps:
-    - name: Get
-      actionRef: chat.getUser
-      connection: chat-main
-    - name: Notify
-      actionRef: chat.postMessage
-      connection: chat-main
-    - name: Log
-      actionRef: core.stdout
-`
-
-func TestInspectWorkflow(t *testing.T) {
-	insp, err := InspectWorkflow([]byte(inspectFixture))
-	if err != nil {
-		t.Fatalf("InspectWorkflow: %v", err)
-	}
-	if len(insp.Connections) != 1 || insp.Connections[0] != "chat-main" {
-		t.Fatalf("connections: %v", insp.Connections)
-	}
-	if len(insp.Outputs) != 2 || insp.Outputs[0] != "email" || insp.Outputs[1] != "id" {
-		t.Fatalf("outputs: %v", insp.Outputs)
-	}
-}
 
 func TestValidateGrant(t *testing.T) {
 	declared := []string{"chat-main", "vcs-app"}
@@ -57,5 +26,38 @@ func TestValidateGrant(t *testing.T) {
 	// No declarations, no grant: fine.
 	if err := ValidateGrant("step s", nil, nil); err != nil {
 		t.Fatalf("empty grant over no declarations: %v", err)
+	}
+}
+
+func TestConnectionAndOutputNames(t *testing.T) {
+	wf, err := Parse([]byte(`apiVersion: orun.dev/v1
+kind: Workflow
+metadata: { name: names }
+connections:
+  vcs-app: { type: http.bearer }
+  chat-main: { type: http.bearer }
+outputs:
+  b: "'x'"
+  a: "'y'"
+steps:
+  - name: s
+    action: http.request
+    connection: vcs-app
+    with: { url: "https://example.invalid" }
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := wf.ConnectionNames(); len(got) != 2 || got[0] != "chat-main" || got[1] != "vcs-app" {
+		t.Fatalf("ConnectionNames not sorted/complete: %v", got)
+	}
+	if got := wf.OutputNames(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("OutputNames not sorted/complete: %v", got)
+	}
+}
+
+func TestDigestBytesMatchesDigest(t *testing.T) {
+	if DigestBytes([]byte("abc")) != "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Fatalf("DigestBytes format drifted: %s", DigestBytes([]byte("abc")))
 	}
 }

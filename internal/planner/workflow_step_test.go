@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/model"
 	"github.com/sourceplane/orun/internal/render"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // legacyInstance is a component instance with no profile — resolveJobsForProfile
@@ -31,9 +31,19 @@ func compositionWith(steps ...model.Step) map[string]*CompositionInfo {
 	}
 }
 
+const notifyWF = `apiVersion: orun.dev/v1
+kind: Workflow
+metadata: { name: notify }
+inputs:
+  channel: { type: string, required: true }
+steps:
+  - name: send
+    run: ["true"]
+`
+
 func TestPlanJobs_WorkflowStepPinsDigest(t *testing.T) {
 	dir := t.TempDir()
-	body := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: notify }\n")
+	body := []byte(notifyWF)
 	if err := os.WriteFile(filepath.Join(dir, "notify.yaml"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +67,7 @@ func TestPlanJobs_WorkflowStepPinsDigest(t *testing.T) {
 	if step.Workflow != "notify.yaml" {
 		t.Errorf("plan step workflow = %q, want notify.yaml", step.Workflow)
 	}
-	if want := workflowbackend.DigestBytes(body); step.WorkflowDigest != want {
+	if want := flow.DigestBytes(body); step.WorkflowDigest != want {
 		t.Errorf("workflowDigest = %q, want %q", step.WorkflowDigest, want)
 	}
 	if step.Run != "" || step.Use != "" {
@@ -67,7 +77,7 @@ func TestPlanJobs_WorkflowStepPinsDigest(t *testing.T) {
 
 func TestPlanJobs_WorkflowPlanIsDeterministic(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte("apiVersion: torkflow/v1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(notifyWF), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	build := func() string {
@@ -105,9 +115,31 @@ func TestPlanJobs_MissingWorkflowFileIsCompileError(t *testing.T) {
 	}
 }
 
+func TestPlanJobs_InvalidWorkflowIsCompileError(t *testing.T) {
+	// Plan-time validation is real (orun-workflows-v3): a workflow the engine
+	// would reject fails the plan, not the run.
+	dir := t.TempDir()
+	bad := "apiVersion: orun.dev/v1\nkind: Workflow\nmetadata: { name: bad }\nsteps:\n  - name: a\n    action: no.such.action\n"
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jp := NewJobPlanner(compositionWith(model.Step{Name: "s", Workflow: "wf.yaml"}))
+	jp.WorkflowBaseDir = dir
+	if _, err := jp.PlanJobs(legacyInstance("svc")); err == nil || !strings.Contains(err.Error(), "unknown action") {
+		t.Fatalf("an invalid workflow must fail the plan: %v", err)
+	}
+	// torkflow/v1 is likewise rejected at plan time (design §12).
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte("apiVersion: torkflow/v1\nkind: Workflow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jp.PlanJobs(legacyInstance("svc")); err == nil || !strings.Contains(err.Error(), "torkflow/v1") {
+		t.Fatalf("torkflow/v1 must fail the plan: %v", err)
+	}
+}
+
 func TestPinWorkflow(t *testing.T) {
 	jp := &JobPlanner{}
-	// No base dir: reference materialized without a digest or inspection.
+	// No base dir: reference materialized without a digest or validation.
 	if _, d, _, err := jp.pinWorkflow("s", "wf.yaml", ""); err != nil || d != "" {
 		t.Fatalf("no base dir should yield empty digest: %q err %v", d, err)
 	}
@@ -121,7 +153,7 @@ func TestPinWorkflow(t *testing.T) {
 func TestPlanJobs_StackShippedWorkflowResolvesAndMaterializes(t *testing.T) {
 	intentDir := t.TempDir()
 	sourceDir := t.TempDir() // the composition Stack's resolved root
-	body := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: packaged }\n")
+	body := []byte(strings.Replace(notifyWF, "name: notify", "name: packaged", 1))
 	if err := os.MkdirAll(filepath.Join(sourceDir, "wf"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +174,7 @@ func TestPlanJobs_StackShippedWorkflowResolvesAndMaterializes(t *testing.T) {
 	step := plan.Jobs[0].Steps[0]
 
 	// The pin is source-agnostic: same bytes, same digest as a local copy (S-7).
-	if want := workflowbackend.DigestBytes(body); step.WorkflowDigest != want {
+	if want := flow.DigestBytes(body); step.WorkflowDigest != want {
 		t.Fatalf("digest parity broken: %q want %q", step.WorkflowDigest, want)
 	}
 	// The reference is rewritten to a content-addressed workspace path …
@@ -168,8 +200,8 @@ func TestPlanJobs_StackShippedWorkflowResolvesAndMaterializes(t *testing.T) {
 func TestPlanJobs_LocalWorkflowWinsOverPackaged(t *testing.T) {
 	intentDir := t.TempDir()
 	sourceDir := t.TempDir()
-	local := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: local }\n")
-	packaged := []byte("apiVersion: torkflow/v1\nkind: Workflow\nmetadata: { name: packaged }\n")
+	local := []byte(strings.Replace(notifyWF, "name: notify", "name: local", 1))
+	packaged := []byte(strings.Replace(notifyWF, "name: notify", "name: packaged", 1))
 	if err := os.WriteFile(filepath.Join(intentDir, "wf.yaml"), local, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -187,19 +219,21 @@ func TestPlanJobs_LocalWorkflowWinsOverPackaged(t *testing.T) {
 	}
 	plan := render.NewRenderer().RenderPlan(model.Metadata{Name: "p"}, ji, nil)
 	step := plan.Jobs[0].Steps[0]
-	if step.Workflow != "wf.yaml" || step.WorkflowDigest != workflowbackend.DigestBytes(local) {
+	if step.Workflow != "wf.yaml" || step.WorkflowDigest != flow.DigestBytes(local) {
 		t.Fatalf("the repo's own workflow must win over the packaged one: %+v", step)
 	}
 }
 
-const connWorkflow = `apiVersion: torkflow/v1
+const connWorkflow = `apiVersion: orun.dev/v1
 kind: Workflow
 metadata: { name: notify }
-spec:
-  steps:
-    - name: Notify
-      actionRef: chat.postMessage
-      connection: chat-main
+connections:
+  chat-main: { type: http.bearer }
+steps:
+  - name: send
+    action: http.request
+    connection: chat-main
+    with: { url: "https://chat.invalid/post" }
 `
 
 func TestPlanJobs_GrantMaterializesIntoPlan(t *testing.T) {
@@ -244,15 +278,16 @@ func TestPlanJobs_MissingGrantIsCompileError(t *testing.T) {
 	}
 }
 
-const outputsWF = `apiVersion: torkflow/v1
+const outputsWF = `apiVersion: orun.dev/v1
 kind: Workflow
 metadata: { name: oncall }
-spec:
-  outputs:
-    email: "{{ Steps.Get.user.email }}"
-  steps:
-    - name: Get
-      actionRef: core.js
+outputs:
+  email: "steps.get.outputs.email"
+steps:
+  - name: get
+    action: script
+    with: { source: "'sam@acme.dev'" }
+    outputs: { email: "output.value" }
 `
 
 func outputsFixture(t *testing.T) string {

@@ -1,4 +1,4 @@
-package workflowbackend
+package flow
 
 import (
 	"strings"

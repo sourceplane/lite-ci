@@ -168,12 +168,12 @@ type Hooks struct {
 
 // Hook is one declared post-step. It is exactly one of:
 //   - Run: an explicit argv, no shell (the shipped form), or
-//   - Workflow: a torkflow workflow file run through the workflow backend
+//   - Workflow: an orun workflow file run through the in-process flow engine
 //     (specs/orun-workflows §3, Surface B).
 type Hook struct {
 	ID  string   `yaml:"id" json:"id"`
 	Run []string `yaml:"run,omitempty" json:"run,omitempty"`
-	// Workflow names a torkflow workflow file (resolved against the blueprint's
+	// Workflow names an orun workflow file (resolved against the blueprint's
 	// directory) to run as this hook. Exactly one of Run/Workflow may be set.
 	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	// With is the declared inputs handed to the workflow as its Trigger context.

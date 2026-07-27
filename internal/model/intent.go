@@ -27,23 +27,11 @@ type Intent struct {
 }
 
 // IntentExecution holds optional execution-layer configuration in intent.yaml.
+// The engine pin of orun-workflows-v2 §6 is gone (orun-workflows-v3 design
+// §11/§12): `workflow:` steps run in-process, so the engine's digest is the
+// orun binary's digest and a declared pin is a load-time error.
 type IntentExecution struct {
 	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
-	// WorkflowEngine pins the workflow engine that executes `workflow:` steps
-	// (orun-workflows-v2 §6). Declared in intent — not ambient host state — so
-	// the pin is a deterministic plan input: it materializes into plan.json and
-	// the runner refuses an engine whose content digest does not match.
-	WorkflowEngine *IntentWorkflowEngine `yaml:"workflowEngine,omitempty" json:"workflowEngine,omitempty"`
-}
-
-// IntentWorkflowEngine is the declared workflow-engine pin.
-type IntentWorkflowEngine struct {
-	// Ref names the engine artifact (an OCI ref or a documented label). Carried
-	// for auditability; the digest is what is enforced.
-	Ref string `yaml:"ref,omitempty" json:"ref,omitempty"`
-	// Digest is the engine binary's content digest ("sha256:<hex>"), as printed
-	// by `orun workflow engine-digest`. Required when the block is present.
-	Digest string `yaml:"digest" json:"digest"`
 }
 
 // IntentExecutionState configures where execution state is stored.

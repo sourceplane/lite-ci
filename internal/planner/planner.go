@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // JobPlanner binds components to jobs and creates instances
@@ -303,17 +303,22 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, tctx *TemplateContext, com
 		if err != nil {
 			return nil, err
 		}
-		renderedWorkflow, workflowDigest, inspection, err := jp.pinWorkflow(step.Name, renderedWorkflow, compositionSourceDir)
+		renderedWorkflow, workflowDigest, pinnedWF, err := jp.pinWorkflow(step.Name, renderedWorkflow, compositionSourceDir)
 		if err != nil {
 			return nil, err
 		}
-		renderedConnections, err := jp.renderConnections(compType, step.Name, step.Connections, inspection, workflowDigest != "", context)
+		var declaredConns []string
+		if pinnedWF != nil {
+			declaredConns = pinnedWF.ConnectionNames()
+		}
+		renderedConnections, err := jp.renderConnections(compType, step.Name, step.Connections, declaredConns, pinnedWF != nil, context)
 		if err != nil {
 			return nil, err
 		}
-		if renderedWorkflow != "" && workflowDigest != "" {
-			outs := make(map[string]struct{}, len(inspection.Outputs))
-			for _, name := range inspection.Outputs {
+		if renderedWorkflow != "" && pinnedWF != nil {
+			names := pinnedWF.OutputNames()
+			outs := make(map[string]struct{}, len(names))
+			for _, name := range names {
 				outs[name] = struct{}{}
 			}
 			for _, key := range []string{step.ID, step.Name} {
@@ -382,13 +387,13 @@ func validateOutputRefs(rendered []model.RenderedStep, declared map[string]map[s
 		if err != nil {
 			return err
 		}
-		for _, ref := range workflowbackend.FindOutputRefs(string(blob)) {
+		for _, ref := range flow.FindOutputRefs(string(blob)) {
 			outs, ok := available[ref.StepID]
 			if !ok {
 				return fmt.Errorf("step %q references ${{ steps.%s.outputs.%s }}, but %q is not an earlier workflow step in this job", step.Name, ref.StepID, ref.Name, ref.StepID)
 			}
 			if _, ok := outs[ref.Name]; !ok {
-				return fmt.Errorf("step %q references ${{ steps.%s.outputs.%s }}, but the workflow declares no output %q (spec.outputs)", step.Name, ref.StepID, ref.Name, ref.Name)
+				return fmt.Errorf("step %q references ${{ steps.%s.outputs.%s }}, but the workflow declares no output %q (outputs:)", step.Name, ref.StepID, ref.Name, ref.Name)
 			}
 		}
 		for _, key := range []string{step.ID, step.Name} {
@@ -404,8 +409,9 @@ func validateOutputRefs(rendered []model.RenderedStep, declared map[string]map[s
 }
 
 // pinWorkflow resolves a rendered `workflow:` reference, returning the
-// (possibly rewritten) reference, its content digest, and the compile-time
-// inspection of its declared names (orun-workflows §5, v2 §4/§5/§7).
+// (possibly rewritten) reference, its content digest, and the fully validated
+// workflow document (orun-workflows-v3: plan-time validation is real — an
+// invalid workflow fails the plan, not the run).
 //
 // Resolution order: the intent directory (WorkflowBaseDir), then the
 // composition's resolved source root — so a golden path can ship its workflows
@@ -417,11 +423,11 @@ func validateOutputRefs(rendered []model.RenderedStep, declared map[string]map[s
 // the resolved bytes — the pin is source-agnostic (S-7).
 //
 // An empty reference or unset base dir yields zero values; an unresolvable or
-// unparseable reference is a compile error, fail-closed.
-func (jp *JobPlanner) pinWorkflow(stepName, workflow, sourceDir string) (string, string, workflowbackend.Inspection, error) {
+// invalid reference is a compile error, fail-closed.
+func (jp *JobPlanner) pinWorkflow(stepName, workflow, sourceDir string) (string, string, *flow.Workflow, error) {
 	workflow = strings.TrimSpace(workflow)
 	if workflow == "" || jp.WorkflowBaseDir == "" {
-		return workflow, "", workflowbackend.Inspection{}, nil
+		return workflow, "", nil, nil
 	}
 	localPath := workflow
 	if !filepath.IsAbs(localPath) {
@@ -431,26 +437,26 @@ func (jp *JobPlanner) pinWorkflow(stepName, workflow, sourceDir string) (string,
 	if err != nil && sourceDir != "" && !filepath.IsAbs(workflow) {
 		if pdata, perr := os.ReadFile(filepath.Join(sourceDir, workflow)); perr == nil {
 			data, err = pdata, nil
-			digest := workflowbackend.DigestBytes(data)
+			digest := flow.DigestBytes(data)
 			rel := filepath.ToSlash(filepath.Join(".orun", "workflows", digestShort(digest)+"-"+filepath.Base(workflow)))
 			dest := filepath.Join(jp.WorkflowBaseDir, filepath.FromSlash(rel))
 			if merr := os.MkdirAll(filepath.Dir(dest), 0o755); merr != nil {
-				return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, merr)
+				return "", "", nil, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, merr)
 			}
 			if werr := os.WriteFile(dest, data, 0o644); werr != nil {
-				return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, werr)
+				return "", "", nil, fmt.Errorf("step %q: materialize packaged workflow: %w", stepName, werr)
 			}
 			workflow = rel
 		}
 	}
 	if err != nil {
-		return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
+		return "", "", nil, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, err)
 	}
-	insp, ierr := workflowbackend.InspectWorkflow(data)
-	if ierr != nil {
-		return "", "", workflowbackend.Inspection{}, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, ierr)
+	wf, perr := flow.Parse(data)
+	if perr != nil {
+		return "", "", nil, fmt.Errorf("step %q: workflow %q: %w", stepName, workflow, perr)
 	}
-	return workflow, workflowbackend.DigestBytes(data), insp, nil
+	return workflow, flow.DigestBytes(data), wf, nil
 }
 
 // digestShort returns the first 12 hex chars of a "sha256:<hex>" digest.
@@ -463,8 +469,8 @@ func digestShort(digest string) string {
 }
 
 // renderConnections templates the grant's secret references and validates the
-// grant against the workflow's declared connections (orun-workflows-v2 §4).
-func (jp *JobPlanner) renderConnections(compType, stepName string, grant map[string]map[string]string, insp workflowbackend.Inspection, hasInspection bool, context map[string]interface{}) (map[string]map[string]string, error) {
+// grant against the workflow's declared connections (design §9).
+func (jp *JobPlanner) renderConnections(compType, stepName string, grant map[string]map[string]string, declaredConns []string, hasInspection bool, context map[string]interface{}) (map[string]map[string]string, error) {
 	var rendered map[string]map[string]string
 	if len(grant) > 0 {
 		rendered = make(map[string]map[string]string, len(grant))
@@ -481,7 +487,7 @@ func (jp *JobPlanner) renderConnections(compType, stepName string, grant map[str
 		}
 	}
 	if hasInspection {
-		if err := workflowbackend.ValidateGrant("step "+stepName, insp.Connections, rendered); err != nil {
+		if err := flow.ValidateGrant("step "+stepName, declaredConns, rendered); err != nil {
 			return nil, err
 		}
 	}
@@ -497,7 +503,7 @@ func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, v
 	// §5) are masked through the compile-time template pass and restored after:
 	// their values exist only at run time, so the compiler validates the names
 	// and leaves the spans for the runner to substitute.
-	masked, spans := workflowbackend.MaskOutputRefs(value)
+	masked, spans := flow.MaskOutputRefs(value)
 
 	cacheKey := fmt.Sprintf("%s:%s:%s", componentType, stepName, fieldName)
 	tmpl, exists := jp.templateCache[cacheKey]
@@ -515,7 +521,7 @@ func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, v
 		return "", fmt.Errorf("failed to execute template in step %s %s: %w", stepName, fieldName, err)
 	}
 
-	return workflowbackend.UnmaskOutputRefs(buf.String(), spans), nil
+	return flow.UnmaskOutputRefs(buf.String(), spans), nil
 }
 
 func (jp *JobPlanner) renderTemplateMap(componentType, stepName, fieldName string, values map[string]interface{}, context map[string]interface{}) (map[string]interface{}, error) {
