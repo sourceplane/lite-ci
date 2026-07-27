@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/ext"
 )
 
 // CEL is the expression contract (design §3): side-effect-free, terminating,
@@ -24,6 +25,7 @@ var interpRe = regexp.MustCompile(`\{\{(.*?)\}\}`)
 
 func celEnv() (*cel.Env, error) {
 	return cel.NewEnv(
+		ext.Strings(), // trim/split/replace etc. — string plumbing is table stakes
 		cel.Variable("inputs", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("steps", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("connections", cel.MapType(cel.StringType, cel.DynType)),
