@@ -3,16 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"path/filepath"
 
 	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
-var workflowRunSet []string
+var (
+	workflowRunSet         []string
+	workflowRunConnections []string
+	workflowRunResume      string
+)
 
 // workflowCmd is the standalone authoring on-ramp for torkflow workflows
 // (specs/orun-workflows WF6): validate / digest / run / view a workflow file
@@ -96,7 +101,9 @@ func registerWorkflowCommand(root *cobra.Command) {
 	workflowCmd.AddCommand(workflowViewCmd)
 	workflowCmd.AddCommand(workflowEngineDigestCmd)
 
-	workflowRunCmd.Flags().StringArrayVar(&workflowRunSet, "set", nil, "Set a Trigger input as key=value (repeatable)")
+	workflowRunCmd.Flags().StringArrayVar(&workflowRunSet, "set", nil, "Set a workflow input as key=value (repeatable)")
+	workflowRunCmd.Flags().StringArrayVar(&workflowRunConnections, "connection", nil, "Grant a connection field as name.field=value (repeatable)")
+	workflowRunCmd.Flags().StringVar(&workflowRunResume, "resume", "", "Resume a prior exec id, re-executing only non-succeeded steps")
 }
 
 // runWorkflowValidate is the real compile check (orun-workflows-v3 WA1): DAG
@@ -116,52 +123,80 @@ func runWorkflowValidate(cmd *cobra.Command, path string) error {
 }
 
 func runWorkflowRun(ctx context.Context, cmd *cobra.Command, path string) error {
-	eng, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
+	wf, err := flow.Load(path)
 	if err != nil {
 		return err
 	}
-	with, err := parseSetFlags(workflowRunSet)
+	inputs, err := parseSetFlags(workflowRunSet)
 	if err != nil {
 		return err
 	}
-	res, err := workflowbackend.RunStep(ctx, eng, workflowbackend.StepSpec{
-		WorkflowPath: path,
-		With:         with,
-		Metadata:     map[string]any{"source": "orun workflow run"},
+	conns, err := parseConnectionFlags(workflowRunConnections)
+	if err != nil {
+		return err
+	}
+	digest, err := flow.Digest(path)
+	if err != nil {
+		return err
+	}
+	res, err := flow.Run(ctx, wf, flow.RunOptions{
+		Dir:         filepath.Dir(path),
+		Inputs:      inputs,
+		Connections: conns,
+		ExecID:      workflowRunResume,
+		Digest:      digest,
+		Log:         cmd.OutOrStdout(),
 	})
 	if err != nil {
 		return err
 	}
-	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "workflow %s: %s\n", path, res.Status)
-	for _, s := range res.Steps {
-		fmt.Fprintf(out, "  - %s: %s\n", s.Name, s.Status)
+	fmt.Fprintf(cmd.OutOrStdout(), "workflow %s: %s (exec %s)\n", path, res.Status, res.ExecID)
+	for name, v := range res.Outputs {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s = %v\n", name, v)
 	}
-	for name, value := range res.Outputs {
-		fmt.Fprintf(out, "  output %s = %v\n", name, value)
-	}
-	if !res.Succeeded() {
-		msg := res.Error
-		if msg == "" {
-			msg = "workflow reported status " + res.Status
-		}
-		return fmt.Errorf("workflow failed: %s", msg)
+	if res.Status != "succeeded" {
+		return fmt.Errorf("workflow failed")
 	}
 	return nil
 }
 
-// runWorkflowView fronts the pinned engine's own `view` subcommand, streaming its
-// output. orun does not parse the workflow itself — it defers rendering to the
-// engine it already pins (design §5/§6).
-func runWorkflowView(ctx context.Context, cmd *cobra.Command, path string) error {
-	eng, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
+// parseConnectionFlags turns --connection name.field=value grants into the
+// engine's connection map. The flag IS the grant (design §9) — a standalone
+// run has no calling step to carry one.
+func parseConnectionFlags(pairs []string) (map[string]map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := map[string]map[string]string{}
+	for _, p := range pairs {
+		key, v, ok := strings.Cut(p, "=")
+		name, field, ok2 := strings.Cut(key, ".")
+		if !ok || !ok2 {
+			return nil, fmt.Errorf("invalid --connection %q: expected name.field=value", p)
+		}
+		if out[name] == nil {
+			out[name] = map[string]string{}
+		}
+		out[name][field] = v
+	}
+	return out, nil
+}
+
+// runWorkflowView renders the DAG in needs order — in-process, no engine.
+func runWorkflowView(_ context.Context, cmd *cobra.Command, path string) error {
+	wf, err := flow.Load(path)
 	if err != nil {
 		return err
 	}
-	c := exec.CommandContext(ctx, eng.Bin, "view", path) //nolint:gosec // pinned engine path, no shell
-	c.Stdout = cmd.OutOrStdout()
-	c.Stderr = cmd.ErrOrStderr()
-	return c.Run()
+	fmt.Fprintf(cmd.OutOrStdout(), "workflow %s (%d steps)\n", wf.Metadata.Name, len(wf.Steps))
+	for _, st := range wf.Steps {
+		needs := ""
+		if len(st.Needs) > 0 {
+			needs = " ← " + strings.Join(st.Needs, ", ")
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s [%s]%s\n", st.Name, st.Verb(), needs)
+	}
+	return nil
 }
 
 // parseSetFlags turns repeated key=value flags into a Trigger inputs map.

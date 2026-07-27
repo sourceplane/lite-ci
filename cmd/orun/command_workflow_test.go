@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -76,42 +75,45 @@ func TestWorkflowDigestCmd(t *testing.T) {
 	}
 }
 
-func writeFakeEngine(t *testing.T, script string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake engine uses /bin/sh")
-	}
-	p := filepath.Join(t.TempDir(), "engine.sh")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func TestWorkflowRunWithFakeEngine(t *testing.T) {
+func TestWorkflowRunInProcess(t *testing.T) {
 	dir := t.TempDir()
-	wf := writeFile(t, dir, "wf.yaml", "apiVersion: torkflow/v1\n")
-
-	eng := writeFakeEngine(t, `echo '{"status":"success","steps":[{"name":"a","status":"success"}]}'`)
-	t.Setenv(workflowbackend.EngineEnv, eng)
-	workflowRunSet = nil
+	wf := writeFile(t, dir, "wf.yaml", `apiVersion: orun.dev/v1
+kind: Workflow
+metadata:
+  name: hello
+outputs:
+  v: "steps.say.outputs.v"
+steps:
+  - name: say
+    action: script
+    with: { source: "'hi'" }
+    outputs: { v: "output.value" }
+`)
+	t.Chdir(dir) // run state lands under the cwd's .orun/wfruns
+	workflowRunSet, workflowRunConnections, workflowRunResume = nil, nil, ""
 
 	c, buf := newCapCmd()
 	if err := runWorkflowRun(context.Background(), c, wf); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(buf.String(), "success") {
-		t.Fatalf("expected success summary, got %q", buf.String())
+	if !strings.Contains(buf.String(), "succeeded") || !strings.Contains(buf.String(), "v = hi") {
+		t.Fatalf("expected success summary with outputs, got %q", buf.String())
 	}
 }
 
 func TestWorkflowRunFailureIsError(t *testing.T) {
 	dir := t.TempDir()
-	wf := writeFile(t, dir, "wf.yaml", "apiVersion: torkflow/v1\n")
-
-	eng := writeFakeEngine(t, `echo '{"status":"failed","error":"boom"}'`)
-	t.Setenv(workflowbackend.EngineEnv, eng)
-	workflowRunSet = nil
+	wf := writeFile(t, dir, "wf.yaml", `apiVersion: orun.dev/v1
+kind: Workflow
+metadata:
+  name: boom
+steps:
+  - name: a
+    action: script
+    with: { source: "nope()" }
+`)
+	t.Chdir(dir)
+	workflowRunSet, workflowRunConnections, workflowRunResume = nil, nil, ""
 
 	c, _ := newCapCmd()
 	if err := runWorkflowRun(context.Background(), c, wf); err == nil {
@@ -119,14 +121,15 @@ func TestWorkflowRunFailureIsError(t *testing.T) {
 	}
 }
 
-func TestWorkflowRunUnconfiguredEngine(t *testing.T) {
+func TestWorkflowViewInProcess(t *testing.T) {
 	dir := t.TempDir()
-	wf := writeFile(t, dir, "wf.yaml", "apiVersion: torkflow/v1\n")
-	t.Setenv(workflowbackend.EngineEnv, "")
-
-	c, _ := newCapCmd()
-	if err := runWorkflowRun(context.Background(), c, wf); err == nil {
-		t.Fatalf("expected error when no engine is configured")
+	wf := writeFile(t, dir, "wf.yaml", goodFlowYAML)
+	c, buf := newCapCmd()
+	if err := runWorkflowView(context.Background(), c, wf); err != nil {
+		t.Fatalf("view: %v", err)
+	}
+	if !strings.Contains(buf.String(), "say [run]") {
+		t.Fatalf("view output: %q", buf.String())
 	}
 }
 
