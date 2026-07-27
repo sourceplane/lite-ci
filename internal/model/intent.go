@@ -176,7 +176,14 @@ type Component struct {
 	Env            map[string]string        `yaml:"env,omitempty" json:"env,omitempty"`
 	// SecretEnv maps env var names to secret:// references (never values —
 	// the planner rejects literals; specs/orun-secrets/data-model.md §2.1).
-	SecretEnv                 map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	// OptionalSecretEnv maps env var names to secret:// references that
+	// resolve BEST-EFFORT: a key absent from the backend is skipped at
+	// resolve (no env var, no failure) instead of failing the job. The
+	// wire-now-seed-later shape for runtime secrets a component CAN consume
+	// before anyone has stored them. Same leak guard; a key may not appear
+	// in env, secretEnv, and optionalSecretEnv at once.
+	OptionalSecretEnv         map[string]string `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
 	Change                    ComponentChange   `yaml:"change,omitempty" json:"change,omitempty"`
 	ResolvedComposition       string            `yaml:"-" json:"-"`
 	ResolvedCompositionSource string            `yaml:"-" json:"-"`
@@ -361,7 +368,14 @@ type ComponentInstance struct {
 	// SecretEnv maps env var names to validated secret:// references,
 	// merged with the same 4-layer precedence as Env. References only —
 	// the expander's leak guard rejects literals.
-	SecretEnv             map[string]string
+	SecretEnv map[string]string
+	// OptionalSecretEnv maps env var names to validated secret:// references
+	// that resolve BEST-EFFORT: a key that does not exist (yet) in the backend
+	// is skipped at resolve — no env var, no failure — instead of failing the
+	// job fail-closed. The wire-now-seed-later shape: a component declares the
+	// runtime secrets it CAN consume before anyone has stored them. Same leak
+	// guard as SecretEnv; a key may not appear in both maps.
+	OptionalSecretEnv     map[string]string
 	StepOverrides         []Step
 	Policies              map[string]interface{}
 	DependsOn             []ResolvedDependency

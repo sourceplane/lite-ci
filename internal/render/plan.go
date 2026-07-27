@@ -153,18 +153,25 @@ func buildPlanJobEnv(job *model.JobInstance) map[string]interface{} {
 // name. References only — no value field exists on the plan, structurally
 // (specs/orun-secrets/data-model.md §5).
 func buildPlanJobSecretRefs(job *model.JobInstance) []model.PlanSecretRef {
-	if len(job.SecretRefs) == 0 {
+	if len(job.SecretRefs) == 0 && len(job.OptionalSecretRefs) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(job.SecretRefs))
+	keys := make([]string, 0, len(job.SecretRefs)+len(job.OptionalSecretRefs))
 	for k := range job.SecretRefs {
+		keys = append(keys, k)
+	}
+	for k := range job.OptionalSecretRefs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	refs := make([]model.PlanSecretRef, 0, len(keys))
 	for _, k := range keys {
-		refs = append(refs, model.PlanSecretRef{AsEnv: k, Ref: job.SecretRefs[k]})
+		if ref, ok := job.SecretRefs[k]; ok {
+			refs = append(refs, model.PlanSecretRef{AsEnv: k, Ref: ref})
+			continue
+		}
+		refs = append(refs, model.PlanSecretRef{AsEnv: k, Ref: job.OptionalSecretRefs[k], Optional: true})
 	}
 	return refs
 }

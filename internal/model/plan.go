@@ -188,6 +188,10 @@ type PlanMaterialize struct {
 type PlanSecretRef struct {
 	AsEnv string `json:"asEnv" yaml:"asEnv"`
 	Ref   string `json:"ref" yaml:"ref"`
+	// Optional marks a best-effort reference: a key absent from the backend
+	// is skipped at resolve (no env var) instead of failing the job. Hard
+	// references (the default) stay fail-closed.
+	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
 }
 
 // PlanPromotionGate is a cross-plan evidence gate in the plan output.

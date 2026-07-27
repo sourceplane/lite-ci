@@ -101,6 +101,14 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 			}
 			instance.SecretEnv = secretEnv
 
+			// Merge best-effort references (same guard; absent keys skip at
+			// resolve instead of failing the job)
+			optionalSecretEnv, err := e.mergeOptionalSecretEnv(comp, env, envName, secretEnv)
+			if err != nil {
+				return nil, err
+			}
+			instance.OptionalSecretEnv = optionalSecretEnv
+
 			// Extract path from merged properties if it exists
 			if pathVal, exists := merged["path"]; exists {
 				if pathStr, ok := pathVal.(string); ok {
@@ -400,6 +408,34 @@ func (e *Expander) mergeSecretEnv(comp model.Component, env model.Environment, e
 		merged[k] = interpolated
 	}
 
+	return merged, nil
+}
+
+// mergeOptionalSecretEnv merges the component's best-effort references
+// (Component.OptionalSecretEnv; component level only in v1 — no intent/
+// environment/subscription layers to merge). The same leak guard applies:
+// every value must parse as a secret:// reference, and a key may not also be
+// a plaintext env entry, a hard secretEnv reference, or declared twice —
+// optionality is a resolve property, not a precedence layer.
+func (e *Expander) mergeOptionalSecretEnv(comp model.Component, env model.Environment, envName string, hardSecretEnv map[string]string) (map[string]string, error) {
+	if len(comp.OptionalSecretEnv) == 0 {
+		return nil, nil
+	}
+	plainEnv := e.mergeEnv(comp, env, envName)
+	merged := make(map[string]string, len(comp.OptionalSecretEnv))
+	for k, v := range comp.OptionalSecretEnv {
+		interpolated := e.interpolateString(v, envName, comp.Domain, comp.Name)
+		if _, err := secretref.Parse(interpolated); err != nil {
+			return nil, fmt.Errorf("component %s (env %s): optionalSecretEnv %s: %w", comp.Name, envName, k, err)
+		}
+		if _, shadowed := plainEnv[k]; shadowed {
+			return nil, fmt.Errorf("component %s (env %s): key %s is declared in both env and optionalSecretEnv — a plaintext env entry may not shadow a secret reference", comp.Name, envName, k)
+		}
+		if _, dup := hardSecretEnv[k]; dup {
+			return nil, fmt.Errorf("component %s (env %s): key %s is declared in both secretEnv and optionalSecretEnv — pick one resolve posture", comp.Name, envName, k)
+		}
+		merged[k] = interpolated
+	}
 	return merged, nil
 }
 

@@ -33,7 +33,12 @@ func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotes
 	wireRunID := remotestate.RunULID(runID)
 	return func(jobID string, refs []model.PlanSecretRef) (map[string]string, error) {
 		refStrings := make([]string, 0, len(refs))
+		optionalStrings := make([]string, 0)
 		for _, ref := range refs {
+			if ref.Optional {
+				optionalStrings = append(optionalStrings, ref.Ref)
+				continue
+			}
 			refStrings = append(refStrings, ref.Ref)
 		}
 		// The lease epoch is the conditional key from this job's claim (0 on
@@ -42,7 +47,7 @@ func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotes
 		if cb, ok := backend.(*statebackend.CoordBackend); ok {
 			epoch = cb.LeaseEpoch(jobID)
 		}
-		resolved, err := client.ResolveRunSecrets(ctx, wireRunID, jobID, runnerID, epoch, refStrings)
+		resolved, err := client.ResolveRunSecrets(ctx, wireRunID, jobID, runnerID, epoch, refStrings, optionalStrings)
 		if err != nil {
 			return nil, err
 		}
@@ -55,6 +60,11 @@ func remoteSecretResolver(ctx context.Context, r *runner.Runner, client *remotes
 			}
 			value, ok := resolved.Secrets[parsed.Key]
 			if !ok {
+				// A best-effort reference whose key is not stored (yet) is
+				// simply skipped — the wire-now-seed-later shape.
+				if ref.Optional {
+					continue
+				}
 				return nil, fmt.Errorf("backend returned no value for %s", ref.AsEnv)
 			}
 			out[ref.AsEnv] = value
@@ -110,6 +120,11 @@ func attachLocalSecretResolver(r *runner.Runner) {
 			override := "ORUN_SECRET_" + parsed.Key
 			if value, ok := os.LookupEnv(override); ok {
 				out[ref.AsEnv] = value
+				continue
+			}
+			// Optional references skip silently when no override exists —
+			// locally the same wire-now-seed-later posture as the backend.
+			if ref.Optional {
 				continue
 			}
 			missing = append(missing, override)

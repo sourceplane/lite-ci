@@ -381,6 +381,12 @@ type ResolveSecretsRequest struct {
 	JobID      string   `json:"jobId"`
 	LeaseEpoch int      `json:"leaseEpoch"`
 	Refs       []string `json:"refs"`
+	// OptionalRefs resolve best-effort: a reference whose key does not exist
+	// is SKIPPED by the server (absent from the response) instead of failing
+	// the whole resolve. A server that predates the field ignores it — the
+	// refs then never resolve and the runner's optional handling skips them,
+	// so version skew degrades to "not seeded yet", never to a failure.
+	OptionalRefs []string `json:"optionalRefs,omitempty"`
 }
 
 // ResolvedSecretMeta is the per-key provenance the resolve returns alongside
@@ -550,9 +556,9 @@ func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) 
 // closed: any error (including 409 lease_lost and typed policy denials) means
 // the dependent job must not start. Not retried — a resolve is lease-bound
 // and the caller re-claims on lease loss.
-func (c *Client) ResolveRunSecrets(ctx context.Context, runID, jobID, runnerID string, leaseEpoch int, refs []string) (*ResolvedSecrets, error) {
+func (c *Client) ResolveRunSecrets(ctx context.Context, runID, jobID, runnerID string, leaseEpoch int, refs, optionalRefs []string) (*ResolvedSecrets, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/secrets/resolve")
-	req := ResolveSecretsRequest{RunnerID: runnerID, JobID: jobID, LeaseEpoch: leaseEpoch, Refs: refs}
+	req := ResolveSecretsRequest{RunnerID: runnerID, JobID: jobID, LeaseEpoch: leaseEpoch, Refs: refs, OptionalRefs: optionalRefs}
 	var resp ResolvedSecrets
 	if err := c.doJSON(ctx, http.MethodPost, path, req, &resp, false); err != nil {
 		return nil, fmt.Errorf("resolve secrets for job %s: %w", jobID, err)
