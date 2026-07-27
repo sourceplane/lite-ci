@@ -42,15 +42,14 @@ foundation.
   `inputs.N` / `connections.N` reference resolves to a declared name, every
   `action:` resolves in the registry, `with:` validates against the action's
   input schema.
-- `orun workflow digest` over the canonical new form; `orun workflow convert`
-  implementing design §2's total mapping from `torkflow/v1`.
+- `orun workflow digest` over the canonical new form. `torkflow/v1` input is
+  rejected with an error naming design §12 (no converter — WA0 decision).
 - CLI symmetry with `orun new`: `orun workflow run --set k=v --values f.yaml`
   feeding `inputs:`.
 
 **Done when.** The design §2 example validates; a file with an unknown action,
 an uncompilable expression, or an undeclared reference fails validation with a
-line-anchored error; `convert` round-trips every torkflow example file in the
-torkflow repo.
+line-anchored error; a `torkflow/v1` file is rejected with the §12 error.
 **Human help.** None.
 
 ---
@@ -120,8 +119,8 @@ resume.
   fixtures, `EngineBackendArgs`.
 - Delete engine digest pinning / OCI engine resolution
   (`execution.workflowEngine`, `PlanWorkflowEngine`,
-  `orun workflow engine-digest`); intent field becomes a warning no-op for one
-  minor version, then an error.
+  `orun workflow engine-digest`); the intent field is an error immediately
+  (design §12 — no compatibility window).
 - Delete the `exec.Command` provider protocol, `actionStore` discovery, and
   `ORUN_TORKFLOW_ENGINE`.
 - Remove any code path that can read a `connections.yaml`/`secrets.yaml`.
