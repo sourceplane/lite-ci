@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
@@ -44,7 +44,10 @@ var workflowDigestCmd = &cobra.Command{
 	Short: "Print the content digest orun would pin for a workflow file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		digest, err := workflowbackend.WorkflowDigest(args[0])
+		if _, err := flow.Load(args[0]); err != nil {
+			return err
+		}
+		digest, err := flow.Digest(args[0])
 		if err != nil {
 			return err
 		}
@@ -96,30 +99,20 @@ func registerWorkflowCommand(root *cobra.Command) {
 	workflowRunCmd.Flags().StringArrayVar(&workflowRunSet, "set", nil, "Set a Trigger input as key=value (repeatable)")
 }
 
-// runWorkflowValidate performs a lightweight, engine-free structural check: the
-// file must be readable and declare a torkflow apiVersion. A full schema check is
-// the engine's job (orun stays engine-agnostic).
+// runWorkflowValidate is the real compile check (orun-workflows-v3 WA1): DAG
+// shape, verb exclusivity, action resolution, CEL compilation, and declared-
+// name reference checks. A file that validates here is a file the engine will
+// accept — the parse-only era (and torkflow/v1) is over.
 func runWorkflowValidate(cmd *cobra.Command, path string) error {
-	data, err := os.ReadFile(path)
+	if _, err := flow.Load(path); err != nil {
+		return err
+	}
+	digest, err := flow.Digest(path)
 	if err != nil {
 		return err
 	}
-	if !looksLikeWorkflow(data) {
-		return fmt.Errorf("%s does not look like a torkflow workflow (no 'apiVersion: torkflow/...')", path)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "ok: %s (%s)\n", path, workflowbackend.DigestBytes(data))
+	fmt.Fprintf(cmd.OutOrStdout(), "ok: %s (%s)\n", path, digest)
 	return nil
-}
-
-// looksLikeWorkflow reports whether the bytes declare a torkflow apiVersion.
-func looksLikeWorkflow(data []byte) bool {
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "apiVersion:") {
-			return strings.Contains(line, "torkflow/")
-		}
-	}
-	return false
 }
 
 func runWorkflowRun(ctx context.Context, cmd *cobra.Command, path string) error {

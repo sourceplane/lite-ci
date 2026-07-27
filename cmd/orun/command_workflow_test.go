@@ -31,9 +31,19 @@ func writeFile(t *testing.T, dir, name, body string) string {
 	return p
 }
 
+const goodFlowYAML = `apiVersion: orun.dev/v1
+kind: Workflow
+metadata:
+  name: hello
+steps:
+  - name: say
+    run: ["echo", "hi"]
+`
+
 func TestWorkflowValidate(t *testing.T) {
 	dir := t.TempDir()
-	good := writeFile(t, dir, "wf.yaml", "apiVersion: torkflow/v1\nkind: Workflow\n")
+	good := writeFile(t, dir, "wf.yaml", goodFlowYAML)
+	old := writeFile(t, dir, "old.yaml", "apiVersion: torkflow/v1\nkind: Workflow\n")
 	bad := writeFile(t, dir, "no.yaml", "apiVersion: sourceplane.io/v1\nkind: Component\n")
 
 	c, buf := newCapCmd()
@@ -43,6 +53,10 @@ func TestWorkflowValidate(t *testing.T) {
 	if !strings.Contains(buf.String(), "ok:") {
 		t.Fatalf("expected ok output, got %q", buf.String())
 	}
+	// torkflow/v1 is rejected outright — no converter, no compat window (v3 §12).
+	if err := runWorkflowValidate(c, old); err == nil || !strings.Contains(err.Error(), "torkflow/v1 workflows are not supported") {
+		t.Fatalf("expected torkflow/v1 rejection, got %v", err)
+	}
 	if err := runWorkflowValidate(c, bad); err == nil {
 		t.Fatalf("expected validation error for a non-workflow file")
 	}
@@ -50,15 +64,14 @@ func TestWorkflowValidate(t *testing.T) {
 
 func TestWorkflowDigestCmd(t *testing.T) {
 	dir := t.TempDir()
-	body := "apiVersion: torkflow/v1\n"
-	p := writeFile(t, dir, "wf.yaml", body)
+	p := writeFile(t, dir, "wf.yaml", goodFlowYAML)
 
 	c, buf := newCapCmd()
 	workflowDigestCmd.SetOut(buf)
 	if err := workflowDigestCmd.RunE(c, []string{p}); err != nil {
 		t.Fatalf("digest: %v", err)
 	}
-	if strings.TrimSpace(buf.String()) != workflowbackend.DigestBytes([]byte(body)) {
+	if strings.TrimSpace(buf.String()) != workflowbackend.DigestBytes([]byte(goodFlowYAML)) {
 		t.Fatalf("digest output mismatch: %q", buf.String())
 	}
 }
