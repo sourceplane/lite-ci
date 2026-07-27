@@ -227,6 +227,9 @@ func (w *Workflow) validate() error {
 				return fmt.Errorf("step %s: retry.kind must be fixed|exponential", s.Name)
 			}
 		}
+		if s.Poll != nil && s.Retry != nil {
+			return fmt.Errorf("step %s: poll and retry are mutually exclusive — the poll loop subsumes retry (design §7)", s.Name)
+		}
 		if s.Poll != nil {
 			for f, v := range map[string]string{"interval": s.Poll.Interval, "timeout": s.Poll.Timeout} {
 				d, err := time.ParseDuration(v)

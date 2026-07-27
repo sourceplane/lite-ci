@@ -248,13 +248,20 @@ func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]a
 			baseDelay, _ = time.ParseDuration(s.Retry.BaseDelay)
 		}
 	}
+	if s.Poll != nil {
+		return pollLoop(ctx, wf, s, vars, opts, st, runDir)
+	}
+
 	var lastErr error
 	for a := 1; a <= attempts; a++ {
 		st.Attempts = a
-		lastErr = runVerbOnce(ctx, wf, s, vars, opts, st, runDir)
+		var rv map[string]any
+		rv, lastErr = runVerbOnce(ctx, wf, s, vars, opts, st, runDir)
 		if lastErr == nil {
-			st.Status = "succeeded"
-			return st
+			if lastErr = sealOutputs(s, rv, st); lastErr == nil {
+				st.Status = "succeeded"
+				return st
+			}
 		}
 		if a < attempts {
 			d := baseDelay
@@ -273,9 +280,104 @@ func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]a
 	return st
 }
 
-// runVerbOnce executes the step's verb a single time and, on success,
-// evaluates the step's declared outputs into st.Outputs.
-func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any, opts RunOptions, st *StepState, runDir string) error {
+// pollLoop re-executes the step's verb on interval until `until` evaluates
+// true, the poll timeout expires, or the context dies (design §7). Every
+// attempt is a recorded run fact via st.Attempts; a run: non-zero exit is an
+// evaluable attempt, not a terminal fault. retry: is rejected on poll steps
+// at validate time — the loop subsumes it.
+func pollLoop(ctx context.Context, wf *Workflow, s *Step, vars map[string]any, opts RunOptions, st *StepState, runDir string) *StepState {
+	interval, _ := time.ParseDuration(s.Poll.Interval)
+	timeout, _ := time.ParseDuration(s.Poll.Timeout)
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		st.Attempts++
+		rv, err := runVerbOnce(ctx, wf, s, vars, opts, st, runDir)
+		lastErr = err
+		terminal := false
+		if err != nil {
+			var xe *ExitErr
+			if !errorsAs(err, &xe) {
+				// Non-exit faults (unresolvable binary, bad interpolation…)
+				// are still retried until the deadline: transient network
+				// faults from action verbs land here too.
+				terminal = false
+			}
+			if rv == nil {
+				rv = map[string]any{}
+			}
+			rv["exitCode"], rv["stdout"], rv["stderr"] = st.ExitCode, st.Stdout, st.Stderr
+		}
+		if !terminal {
+			v, uerr := EvalExpr(s.Poll.Until, merged(vars, rv))
+			if uerr == nil {
+				if ok, _ := v.(bool); ok {
+					if serr := sealOutputs(s, rv, st); serr != nil {
+						st.Status, st.Error = "failed", serr.Error()
+						return st
+					}
+					st.Status = "succeeded"
+					return st
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			msg := fmt.Sprintf("poll: %s not satisfied within %s after %d attempt(s)", s.Poll.Until, s.Poll.Timeout, st.Attempts)
+			if lastErr != nil {
+				msg += ": last error: " + lastErr.Error()
+			}
+			st.Status, st.Error = "failed", msg
+			return st
+		}
+		select {
+		case <-time.After(interval):
+		case <-ctx.Done():
+			st.Status, st.Error = "failed", ctx.Err().Error()
+			return st
+		}
+	}
+}
+
+func merged(a, b map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+func errorsAs(err error, target **ExitErr) bool {
+	xe, ok := err.(*ExitErr)
+	if ok {
+		*target = xe
+	}
+	return ok
+}
+
+// sealOutputs evaluates the step's declared outputs over the attempt result.
+func sealOutputs(s *Step, resultVars map[string]any, st *StepState) error {
+	for name, expr := range s.Outputs {
+		v, err := EvalExpr(expr, resultVars)
+		if err != nil {
+			return fmt.Errorf("outputs.%s: %w", name, err)
+		}
+		if st.Outputs == nil {
+			st.Outputs = map[string]any{}
+		}
+		st.Outputs[name] = v
+	}
+	if out, ok := resultVars["output"].(map[string]any); ok && st.Outputs == nil {
+		st.Outputs = out
+	}
+	return nil
+}
+
+// runVerbOnce executes the step's verb a single time and returns the result
+// variables (output/exitCode/stdout/stderr) for outputs/until evaluation.
+func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any, opts RunOptions, st *StepState, runDir string) (map[string]any, error) {
 	timeout := DefaultStepTimeout
 	if s.Timeout != "" {
 		timeout, _ = time.ParseDuration(s.Timeout)
@@ -291,7 +393,7 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 	switch s.Verb() {
 	case "run":
 		if err := runExec(sctx, s, vars, runDir, st); err != nil {
-			return err
+			return resultVars, err
 		}
 		resultVars["exitCode"] = st.ExitCode
 		resultVars["stdout"] = st.Stdout
@@ -299,36 +401,36 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 	case "action":
 		action, err := ResolveAction(s.Action)
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		with, err := interpolateMap(s.With, vars)
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		if err := action.Validate(with); err != nil {
-			return err
+			return resultVars, err
 		}
 		out, err := action.Invoke(sctx, with, opts.Connections[s.Connection])
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		resultVars["output"] = out
 	case "workflow":
 		path := filepath.Join(opts.Dir, s.Workflow)
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		if opts.visited[abs] {
-			return fmt.Errorf("nested workflow cycle at %s", s.Workflow)
+			return resultVars, fmt.Errorf("nested workflow cycle at %s", s.Workflow)
 		}
 		sub, err := Load(path)
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		with, err := interpolateMap(s.With, vars)
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		digest, _ := Digest(path)
 		visited := map[string]bool{abs: true}
@@ -340,28 +442,14 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 			RunRoot: opts.RunRoot, Digest: digest, Log: opts.Log, visited: visited,
 		})
 		if err != nil {
-			return err
+			return resultVars, err
 		}
 		if subRes.Status != "succeeded" {
-			return fmt.Errorf("nested workflow %s failed", s.Workflow)
+			return resultVars, fmt.Errorf("nested workflow %s failed", s.Workflow)
 		}
 		resultVars["output"] = subRes.Outputs
 	}
-
-	for name, expr := range s.Outputs {
-		v, err := EvalExpr(expr, resultVars)
-		if err != nil {
-			return fmt.Errorf("outputs.%s: %w", name, err)
-		}
-		if st.Outputs == nil {
-			st.Outputs = map[string]any{}
-		}
-		st.Outputs[name] = v
-	}
-	if out, ok := resultVars["output"].(map[string]any); ok && st.Outputs == nil {
-		st.Outputs = out
-	}
-	return nil
+	return resultVars, nil
 }
 
 func interpolateMap(m map[string]any, vars map[string]any) (map[string]any, error) {
