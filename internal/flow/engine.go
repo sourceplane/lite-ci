@@ -139,7 +139,7 @@ func Run(ctx context.Context, wf *Workflow, opts RunOptions) (*RunResult, error)
 		go func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			st := executeStep(ctx, wf, s, inputs, stepsVar(), opts)
+			st := executeStep(ctx, wf, s, inputs, stepsVar(), opts, runDir)
 			mu.Lock()
 			states[s.Name] = st
 			_ = writeJSON(filepath.Join(runDir, "steps", s.Name+".json"), st)
@@ -224,7 +224,7 @@ func Run(ctx context.Context, wf *Workflow, opts RunOptions) (*RunResult, error)
 }
 
 // executeStep runs one step through if-guard, retry loop and verb dispatch.
-func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]any, steps map[string]any, opts RunOptions) *StepState {
+func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]any, steps map[string]any, opts RunOptions, runDir string) *StepState {
 	st := &StepState{Name: s.Name}
 	vars := map[string]any{"inputs": inputs, "steps": steps}
 
@@ -251,7 +251,7 @@ func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]a
 	var lastErr error
 	for a := 1; a <= attempts; a++ {
 		st.Attempts = a
-		lastErr = runVerbOnce(ctx, wf, s, vars, opts, st)
+		lastErr = runVerbOnce(ctx, wf, s, vars, opts, st, runDir)
 		if lastErr == nil {
 			st.Status = "succeeded"
 			return st
@@ -275,7 +275,7 @@ func executeStep(ctx context.Context, wf *Workflow, s *Step, inputs map[string]a
 
 // runVerbOnce executes the step's verb a single time and, on success,
 // evaluates the step's declared outputs into st.Outputs.
-func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any, opts RunOptions, st *StepState) error {
+func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any, opts RunOptions, st *StepState, runDir string) error {
 	timeout := DefaultStepTimeout
 	if s.Timeout != "" {
 		timeout, _ = time.ParseDuration(s.Timeout)
@@ -290,7 +290,12 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 
 	switch s.Verb() {
 	case "run":
-		return fmt.Errorf("run: verb lands in WA3")
+		if err := runExec(sctx, s, vars, runDir, st); err != nil {
+			return err
+		}
+		resultVars["exitCode"] = st.ExitCode
+		resultVars["stdout"] = st.Stdout
+		resultVars["stderr"] = st.Stderr
 	case "action":
 		action, err := ResolveAction(s.Action)
 		if err != nil {
