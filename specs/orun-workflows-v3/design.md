@@ -162,8 +162,10 @@ no shell):
   literal. Anyone needing a shell writes `["bash", "-lc", "..."]` explicitly
   and owns that choice visibly in review.
 - `cwd` defaults to the step's run dir, never the process cwd.
-- `env` is an **allowlist**; nothing is inherited. Credentials arrive via
-  `connection:`, not the ambient environment.
+- `env` is an **allowlist over a fixed hygienic base** (`PATH`, `HOME`,
+  `TMPDIR` — without which no real tool runs) plus the declared keys; nothing
+  else is inherited. Credentials arrive via `connection:`, not the ambient
+  environment.
 - `timeout` mandatory (bounded default), kill on expiry.
 - Result fields available to `outputs:`/`until:` expressions: `exitCode`,
   `stdout`, `stderr`. Non-zero exit fails the step unless `continueOnError`.
@@ -208,7 +210,9 @@ during this review) have no successor. A workflow declares connection *names*;
 the calling surface (step or hook `connections:` grant) maps each name to
 `secret://` references resolved through orun's secrets machinery at run time,
 mapped-only, exactly as v2 shipped. In-memory only, redacted in logs, never in
-run-state files.
+run-state files. A **standalone** `orun workflow run` (no calling step to carry
+a grant) supplies the same mapping via `--connection <name>.<field>=<secret://ref|value>`
+— the flag is the grant.
 
 ## 10. Trust model
 
@@ -228,14 +232,13 @@ digest pinning and OCI engine resolution (v2 §6) · `ORUN_TORKFLOW_ENGINE`
 protocol and `actionStore` discovery · `orun workflow engine-digest`. The
 engine's digest is the orun binary's digest.
 
-## 12. Migration
+## 12. Migration — there is none (WA0 decision)
 
-- `orun workflow convert <torkflow/v1 file>` emits the v3 form; the mapping in
-  §2 is total (every old construct has a target). Conversion is one-way and
-  the converted file gets a fresh digest — references must be re-pinned, which
-  is acceptable at an installed base of near zero.
-- `torkflow/v1` files remain **runnable** (converted in memory, with a
-  deprecation warning) for one minor version, then rejected with the convert
-  hint.
-- `execution.workflowEngine` in an intent: ignored no-op with a warning for one
-  minor version, then an error.
+Product decision, recorded here: **no backward compatibility.** The installed
+base rounds to zero, so:
+
+- `torkflow/v1` files are **rejected** with an error naming this spec. No
+  converter ships; the §2 mapping table is the manual migration guide for the
+  handful of example files that exist.
+- `execution.workflowEngine` in an intent is an **error** immediately.
+- `ORUN_TORKFLOW_ENGINE` is deleted, not deprecated.

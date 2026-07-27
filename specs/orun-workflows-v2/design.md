@@ -53,8 +53,10 @@
 
 **Non-goals**
 - New providers, the secrets store itself, `postModule` hooks, in-process
-  engine import, event-driven triggers, a visual builder (README phase
-  boundaries). v1's invariants are not renegotiated — v2 only extends them.
+  engine import *(reversed by v3 WA0 — the premise, torkflow as a live
+  standalone product, no longer holds)*, event-driven triggers, a visual
+  builder (README phase boundaries). v1's invariants are not renegotiated —
+  v2 only extends them.
 
 ## 3. `contract/v1` — a contract with two signatures on it
 
@@ -170,6 +172,11 @@ spec:
   sealing or injection (the sweep already exists; outputs route through it).
 
 ## 6. The engine is plan content
+
+> **SUPERSEDED by `specs/orun-workflows-v3` (WA0).** torkflow was discontinued
+> as a standalone product; the engine is in-process, so there is no engine
+> artifact left to pin — its digest is the orun binary's. This section is kept
+> as the record of what v2 shipped.
 
 - **Digest in the plan (MUST).** The resolved engine's content digest
   materializes into `plan.json` (alongside `compositionSources`) and into
