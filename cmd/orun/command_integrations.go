@@ -33,17 +33,26 @@ var (
 	integrationsTemplateFlag string
 	integrationsModeFlag     string
 	integrationsParamFlags   []string
+	integrationsBaseFlag     string
+	integrationsNameFlag     string
+	integrationsDescFlag     string
 )
 
 // integrationsResources / integrationsVerbs are the STATIC halves of the
 // grammar (the provider positional is dynamic). Kept as data so the typo
 // suggester and the usage error speak from one list.
 var (
-	integrationsResources = []string{"secret"}
-	integrationsVerbs     = []string{"create"}
+	integrationsResources     = []string{"secret", "templates", "status"}
+	integrationsVerbs         = []string{"create"}
+	integrationsTemplateVerbs = []string{"list", "create", "retire", "reactivate"}
 )
 
-const integrationsUsageLine = "orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]"
+const integrationsUsageLine = `orun integrations list
+  orun integrations <provider> status
+  orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]
+  orun integrations <provider> templates list
+  orun integrations <provider> templates create <ID> --base <id> --name <s> [--description <s>]
+  orun integrations <provider> templates retire|reactivate <ID>`
 
 func registerIntegrationsCommand(root *cobra.Command) {
 	integrationsCmd, state := newIntegrationsCommand()
@@ -57,8 +66,8 @@ func registerIntegrationsCommand(root *cobra.Command) {
 func newIntegrationsCommand() (*cobra.Command, *integrationsDynamicState) {
 	state := &integrationsDynamicState{}
 	integrationsCmd := &cobra.Command{
-		Use:   "integrations <provider> secret create <KEY>",
-		Short: "Integration-owned secret authoring (providers and templates come from the platform, not the CLI)",
+		Use:   "integrations [list | <provider> <resource> …]",
+		Short: "Integration connections, scope templates, and integration-owned secret authoring",
 		Long: `Author integration-bound secrets in the owning integration's namespace
 (saas-secrets-platform SP5). The value is never entered: it is minted from the
 provider connection — just-in-time at resolve (--mode brokered) or once + on a
@@ -72,6 +81,10 @@ what the org's integrations actually declare.
 Viewing and lifecycle stay on the substrate: use ` + "`orun secrets list/rotate/\nreveal/revoke/versions`" + ` for any secret, of any type.
 
 Examples:
+  orun integrations list
+  orun integrations cloudflare status
+  orun integrations cloudflare templates list
+  orun integrations cloudflare templates create deploy-prod --base workers-deploy --name "Deploy prod workers"
   orun integrations cloudflare secret create CF_DEPLOY_TOKEN \
     --connection int_0123… --template workers-deploy --env prod
   orun integrations cloudflare secret create CF_API_TOKEN \
@@ -98,14 +111,43 @@ Examples:
 				fmt.Fprintln(os.Stderr, "\n"+integrationsSyncHint)
 				return err
 			}
+			// `list` sits at the top level (no provider): every connection the
+			// workspace can consume, with status. Handled BEFORE the cached-
+			// registry branch — with provider subtrees mounted, anything else
+			// reaching this RunE is an unknown provider, but `list` is ours.
+			if args[0] == "list" {
+				if len(args) > 1 {
+					return fmt.Errorf("unexpected argument %q after \"list\"\n\nusage:\n  %s", args[1], integrationsUsageLine)
+				}
+				return runIntegrationsList(cmd)
+			}
 			if state.cache != nil {
 				return unknownIntegrationProvider(state.cache, args[0])
 			}
-			provider, key, err := parseIntegrationsSecretArgs(args)
-			if err != nil {
-				return err
+			provider := strings.TrimSpace(args[0])
+			if provider == "" {
+				return fmt.Errorf("usage:\n  %s", integrationsUsageLine)
 			}
-			return runIntegrationsSecretCreate(cmd, provider, key)
+			if len(args) < 2 {
+				return fmt.Errorf("missing resource after provider %q\n\nusage:\n  %s", provider, integrationsUsageLine)
+			}
+			switch args[1] {
+			case "secret":
+				key, err := parseIntegrationsSecretArgs(args)
+				if err != nil {
+					return err
+				}
+				return runIntegrationsSecretCreate(cmd, provider, key)
+			case "templates":
+				return runIntegrationsTemplates(cmd, provider, args[2:])
+			case "status":
+				if len(args) > 2 {
+					return fmt.Errorf("unexpected argument %q after \"status\"\n\nusage:\n  %s", args[2], integrationsUsageLine)
+				}
+				return runIntegrationsStatus(cmd, provider)
+			default:
+				return unknownIntegrationsWord("resource", args[1], integrationsResources)
+			}
 		},
 	}
 	integrationsCmd.PersistentFlags().StringVar(&secretsBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
@@ -120,38 +162,281 @@ Examples:
 	integrationsCmd.Flags().IntVar(&secretsGraceSeconds, "grace-seconds", 0, "Overlap seconds the prior token stays valid after a rotation (rotated mode; default: server 24h)")
 	integrationsCmd.Flags().StringVar(&secretsDeliverTarget, "deliver-target", "", "Materialize target re-delivered on rotation for a long-lived consumer (rotated mode)")
 	integrationsCmd.Flags().StringVar(&secretsDisplayName, "display-name", "", "Human display name for the key")
+	integrationsCmd.Flags().StringVar(&integrationsBaseFlag, "base", "", "Declared base template a custom template derives from (templates create; required)")
+	integrationsCmd.Flags().StringVar(&integrationsNameFlag, "name", "", "Display name for a custom template (templates create; required)")
+	integrationsCmd.Flags().StringVar(&integrationsDescFlag, "description", "", "Description for a custom template (templates create)")
 	integrationsCmd.AddCommand(newIntegrationsSyncCommand())
 	return integrationsCmd, state
 }
 
+// newTemplatesExtensionCommand mounts the scope-template tree on a provider's
+// DYNAMIC subtree (ICL3 extension), so the verbs exist whether or not a cached
+// registry rendered the provider as a real subcommand. Flags are local — a
+// mounted subcommand does not inherit the parent's non-persistent flags.
+func newTemplatesExtensionCommand(provider string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "templates <list|create <ID> --base <id> --name <s>|retire <ID>|reactivate <ID>>",
+		Short: "Scope templates: the declared catalog plus org-curated derivations (SP4)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(c *cobra.Command, args []string) error {
+			return runIntegrationsTemplates(c, provider, args)
+		},
+	}
+	cmd.Flags().StringVar(&integrationsBaseFlag, "base", "", "Declared base template the custom template derives from (create; required)")
+	cmd.Flags().StringVar(&integrationsNameFlag, "name", "", "Display name for the custom template (create; required)")
+	cmd.Flags().StringVar(&integrationsDescFlag, "description", "", "Description for the custom template (create)")
+	addSecretsJSONFlag(cmd)
+	return cmd
+}
+
+// newStatusExtensionCommand mounts the provider status view on the dynamic
+// subtree — the provider's connections plus a template-catalog summary.
+func newStatusExtensionCommand(provider string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Connections and template summary for this provider",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runIntegrationsStatus(c, provider)
+		},
+	}
+	addSecretsJSONFlag(cmd)
+	return cmd
+}
+
+// runIntegrationsList renders every connection the workspace can consume
+// (owned + inherited account-shared), with status — the CLI twin of the
+// console's Integrations page.
+func runIntegrationsList(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+	rt, err := newSecretsRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	connections, err := rt.client.ListConnections(ctx, rt.org)
+	if err != nil {
+		return err
+	}
+	if secretsJSONOut {
+		return emitJSON(connections)
+	}
+	if len(connections) == 0 {
+		fmt.Println("No integrations connected. Connect one in the console (Integrations → Connect).")
+		return nil
+	}
+	sort.Slice(connections, func(i, j int) bool {
+		if connections[i].Provider != connections[j].Provider {
+			return connections[i].Provider < connections[j].Provider
+		}
+		return connections[i].ID < connections[j].ID
+	})
+	headers := []string{"PROVIDER", "CONNECTION", "ACCOUNT", "STATUS", "SHARING", "CONNECTED"}
+	rows := make([][]string, 0, len(connections))
+	for _, c := range connections {
+		sharing := c.Scope
+		if c.Inherited {
+			sharing += " (inherited)"
+		}
+		connected := "-"
+		if c.ConnectedAt != nil && *c.ConnectedAt != "" {
+			connected = formatAge(*c.ConnectedAt)
+		}
+		rows = append(rows, []string{
+			c.Provider,
+			c.ID,
+			c.AccountLabel(),
+			c.Status,
+			orDash(sharing),
+			connected,
+		})
+	}
+	fmt.Print(renderColumns(headers, rows))
+	return nil
+}
+
+// runIntegrationsStatus renders one provider's connections plus its template
+// catalog summary — "can this provider mint, and from which connection".
+func runIntegrationsStatus(cmd *cobra.Command, provider string) error {
+	ctx := cmd.Context()
+	rt, err := newSecretsRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	connections, err := rt.client.ListConnections(ctx, rt.org)
+	if err != nil {
+		return err
+	}
+	mine := make([]configsurface.Connection, 0, len(connections))
+	for _, c := range connections {
+		if c.Provider == provider {
+			mine = append(mine, c)
+		}
+	}
+	templates, tplErr := rt.client.ListScopeTemplates(ctx, rt.org, provider)
+	if secretsJSONOut {
+		return emitJSON(map[string]any{
+			"provider":    provider,
+			"connections": mine,
+			"templates":   templates,
+		})
+	}
+	if len(mine) == 0 {
+		known := make(map[string]struct{})
+		for _, c := range connections {
+			known[c.Provider] = struct{}{}
+		}
+		names := make([]string, 0, len(known))
+		for p := range known {
+			names = append(names, p)
+		}
+		sort.Strings(names)
+		if len(names) > 0 {
+			return fmt.Errorf("no %s connection in this workspace (connected providers: %s)", provider, strings.Join(names, ", "))
+		}
+		return fmt.Errorf("no %s connection in this workspace", provider)
+	}
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	for _, c := range mine {
+		mark := ui.Green(color, "●")
+		if c.Status != "active" {
+			mark = ui.Red(color, "●")
+		}
+		fmt.Printf("%s %s — %s · %s · %s\n", mark, c.ID, c.AccountLabel(), c.Status, orDash(c.Scope))
+	}
+	if tplErr == nil {
+		active, custom := 0, 0
+		for _, t := range templates {
+			if t.Active() {
+				active++
+			}
+			if t.Origin == "custom" {
+				custom++
+			}
+		}
+		fmt.Printf("\n%d scope template(s) (%d active, %d custom) — `orun integrations %s templates list`\n", len(templates), active, custom, provider)
+	}
+	return nil
+}
+
+// runIntegrationsTemplates dispatches the `templates` verb tree: the manage
+// view of the provider's scope-template catalog (declared + org customs) and
+// the org-curated authoring verbs (SP4 — create derives from a declared base;
+// retire is soft, reactivate undoes it).
+func runIntegrationsTemplates(cmd *cobra.Command, provider string, rest []string) error {
+	if len(rest) == 0 {
+		return fmt.Errorf("missing verb after \"templates\"\n\nusage:\n  %s", integrationsUsageLine)
+	}
+	verb := rest[0]
+	// The whole grammar gate runs BEFORE auth/network so a typo never
+	// round-trips (the secrets tree's fail-fast dialect, SP-A7).
+	switch verb {
+	case "list", "create", "retire", "reactivate":
+	default:
+		return unknownIntegrationsWord("verb", verb, integrationsTemplateVerbs)
+	}
+	if verb != "list" && len(rest) < 2 {
+		return fmt.Errorf("missing <ID>\n\nusage:\n  %s", integrationsUsageLine)
+	}
+	if verb == "create" && (strings.TrimSpace(integrationsBaseFlag) == "" || strings.TrimSpace(integrationsNameFlag) == "") {
+		return fmt.Errorf("templates create requires --base <declared template id> and --name <display name>")
+	}
+	ctx := cmd.Context()
+	rt, err := newSecretsRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	switch verb {
+	case "list":
+		if len(rest) > 1 {
+			return fmt.Errorf("unexpected argument %q after \"list\"\n\nusage:\n  %s", rest[1], integrationsUsageLine)
+		}
+		templates, err := rt.client.ListScopeTemplates(ctx, rt.org, provider)
+		if err != nil {
+			return err
+		}
+		if secretsJSONOut {
+			return emitJSON(templates)
+		}
+		if len(templates) == 0 {
+			fmt.Printf("Provider %s declares no scope templates.\n", provider)
+			return nil
+		}
+		headers := []string{"ID", "NAME", "ORIGIN", "STATUS", "PARAMS", "BASE"}
+		rows := make([][]string, 0, len(templates))
+		for _, t := range templates {
+			origin := t.Origin
+			if origin == "" {
+				origin = "declared"
+			}
+			status := t.Status
+			if status == "" {
+				status = "active"
+			}
+			rows = append(rows, []string{
+				t.ID,
+				t.DisplayName,
+				origin,
+				status,
+				orDash(strings.Join(t.Params, ",")),
+				orDash(t.BaseTemplate),
+			})
+		}
+		fmt.Print(renderColumns(headers, rows))
+		return nil
+	case "create":
+		tpl, err := rt.client.CreateScopeTemplate(ctx, rt.org, provider, configsurface.CreateScopeTemplateRequest{
+			TemplateID:   rest[1],
+			BaseTemplate: integrationsBaseFlag,
+			DisplayName:  integrationsNameFlag,
+			Description:  integrationsDescFlag,
+		})
+		if err != nil {
+			return err
+		}
+		if secretsJSONOut {
+			return emitJSON(tpl)
+		}
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Printf("%s created template %s (from %s)\n", ui.Green(color, "✓"), tpl.ID, tpl.BaseTemplate)
+		return nil
+	case "retire", "reactivate":
+		status := "retired"
+		if verb == "reactivate" {
+			status = "active"
+		}
+		tpl, err := rt.client.UpdateScopeTemplate(ctx, rt.org, provider, rest[1], configsurface.UpdateScopeTemplateRequest{Status: status})
+		if err != nil {
+			return err
+		}
+		if secretsJSONOut {
+			return emitJSON(tpl)
+		}
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Printf("%s %s template %s\n", ui.Green(color, "✓"), verb+"d", tpl.ID)
+		return nil
+	default:
+		return unknownIntegrationsWord("verb", verb, integrationsTemplateVerbs)
+	}
+}
+
 // parseIntegrationsSecretArgs parses the positional grammar
-// `<provider> secret create <KEY>`. The provider half is dynamic (validated
-// later against the capability read); the static halves fail loudly with a
+// `<provider> secret create <KEY>` (the dispatcher has already consumed the
+// provider and matched "secret"). The static halves fail loudly with a
 // "did you mean" suggestion, extending the secrets tree's typo UX (SP-A7).
-func parseIntegrationsSecretArgs(args []string) (provider, key string, err error) {
-	provider = strings.TrimSpace(args[0])
-	if provider == "" {
-		return "", "", fmt.Errorf("usage: %s", integrationsUsageLine)
-	}
-	if len(args) < 2 {
-		return "", "", fmt.Errorf("missing resource after provider %q\n\nusage:\n  %s", provider, integrationsUsageLine)
-	}
-	if args[1] != "secret" {
-		return "", "", unknownIntegrationsWord("resource", args[1], integrationsResources)
-	}
+func parseIntegrationsSecretArgs(args []string) (key string, err error) {
 	if len(args) < 3 {
-		return "", "", fmt.Errorf("missing verb after %q\n\nusage:\n  %s", "secret", integrationsUsageLine)
+		return "", fmt.Errorf("missing verb after %q\n\nusage:\n  %s", "secret", integrationsUsageLine)
 	}
 	if args[2] != "create" {
-		return "", "", unknownIntegrationsWord("verb", args[2], integrationsVerbs)
+		return "", unknownIntegrationsWord("verb", args[2], integrationsVerbs)
 	}
 	if len(args) < 4 {
-		return "", "", fmt.Errorf("missing <KEY>\n\nusage:\n  %s", integrationsUsageLine)
+		return "", fmt.Errorf("missing <KEY>\n\nusage:\n  %s", integrationsUsageLine)
 	}
 	if len(args) > 4 {
-		return "", "", fmt.Errorf("unexpected argument %q after the key\n\nusage:\n  %s", args[4], integrationsUsageLine)
+		return "", fmt.Errorf("unexpected argument %q after the key\n\nusage:\n  %s", args[4], integrationsUsageLine)
 	}
-	return provider, args[3], nil
+	return args[3], nil
 }
 
 // unknownIntegrationsWord is the typo error for the static grammar words,
