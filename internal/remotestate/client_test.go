@@ -446,7 +446,7 @@ func TestClient_ResolveRunSecrets_PathCarriesRunID(t *testing.T) {
 	wireID := remotestate.RunULID("29470560319-1") // the exec id → contract ULID
 	out, err := c.ResolveRunSecrets(context.Background(), wireID, "job-1", "runner-1", 7, []string{
 		"secret://sourceplane/ogpic/dev/OGPIC_ORUN_SMOKE",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

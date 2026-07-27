@@ -158,6 +158,26 @@ func mergeBindingRefs(secretEnv map[string]string, bindings []model.ResolvedSecr
 	return merged, nil
 }
 
+// mergeOptionalRefs prepares a job's best-effort references from the
+// component's optionalSecretEnv. The expander already leak-guarded the
+// references and blocked component-level collisions; the one conflict only
+// visible here is an env var name the HARD map (secretEnv ∪ profile
+// bindings) also claims — one name cannot be fail-closed and best-effort at
+// once, so that is a compile error naming the key.
+func mergeOptionalRefs(optionalSecretEnv, hardRefs map[string]string) (map[string]string, error) {
+	if len(optionalSecretEnv) == 0 {
+		return nil, nil
+	}
+	merged := make(map[string]string, len(optionalSecretEnv))
+	for k, v := range optionalSecretEnv {
+		if _, taken := hardRefs[k]; taken {
+			return nil, fmt.Errorf("key %s is bound as both a required reference (secretEnv or a profile secretBinding) and an optionalSecretEnv reference — one env var cannot be fail-closed and best-effort at once", k)
+		}
+		merged[k] = v
+	}
+	return merged, nil
+}
+
 // sameRef reports whether two reference spellings denote the same reference.
 // An unparseable side falls back to exact string equality — the caller has
 // already validated the binding's own reference, and a malformed secretEnv

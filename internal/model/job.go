@@ -197,6 +197,9 @@ type JobInstance struct {
 	Retries                  int
 	Parameters               map[string]interface{}
 	Env                      map[string]string
+	// OptionalSecretRefs maps env var names to secret:// references that
+	// resolve best-effort: an absent key is skipped, never a failure.
+	OptionalSecretRefs map[string]string
 	// SecretRefs maps env var names to secret:// references (never values).
 	// Resolved to plaintext only in the runner, at step launch.
 	SecretRefs map[string]string

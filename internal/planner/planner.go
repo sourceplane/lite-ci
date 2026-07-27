@@ -94,6 +94,10 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				if mergeErr != nil {
 					return nil, fmt.Errorf("component %s (env %s): %w", compInst.ComponentName, envName, mergeErr)
 				}
+				optionalSecretRefs, optErr := mergeOptionalRefs(compInst.OptionalSecretEnv, secretRefs)
+				if optErr != nil {
+					return nil, fmt.Errorf("component %s (env %s): %w", compInst.ComponentName, envName, optErr)
+				}
 				jobInst := &model.JobInstance{
 					ID:                       jobID,
 					Name:                     jobEntry.job.Name,
@@ -114,6 +118,7 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 					Parameters:               compInst.Parameters,
 					Env:                      compInst.Env,
 					SecretRefs:               secretRefs,
+					OptionalSecretRefs:       optionalSecretRefs,
 					SecretBindings:           bindings,
 					Materialize:              materialize,
 					DependsOn:                make([]string, 0),

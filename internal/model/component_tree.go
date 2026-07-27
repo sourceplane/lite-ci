@@ -39,8 +39,11 @@ type ComponentTreeComponent struct {
 	Env       map[string]string  `yaml:"env,omitempty" json:"env,omitempty"`
 	// SecretEnv maps env var names to secret:// references (never values —
 	// references are opaque content, safe in the discovery cache).
-	SecretEnv   map[string]string      `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
-	Parameters  map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	SecretEnv map[string]string `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
+	// OptionalSecretEnv mirrors Component.OptionalSecretEnv (best-effort
+	// references). Same cache rule: references only, never values.
+	OptionalSecretEnv map[string]string      `yaml:"optionalSecretEnv,omitempty" json:"optionalSecretEnv,omitempty"`
+	Parameters        map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 	Overrides   ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
 	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
 	DependsOn   []Dependency           `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
@@ -59,10 +62,11 @@ func (entry ComponentTreeComponent) ToComponent() Component {
 		Domain:     entry.Domain,
 		Enabled:    entry.Enabled,
 		Path:       entry.Path,
-		Subscribe:  entry.Subscribe,
-		Env:        entry.Env,
-		SecretEnv:  entry.SecretEnv,
-		Parameters: entry.Parameters,
+		Subscribe:         entry.Subscribe,
+		Env:               entry.Env,
+		SecretEnv:         entry.SecretEnv,
+		OptionalSecretEnv: entry.OptionalSecretEnv,
+		Parameters:        entry.Parameters,
 		Overrides:  entry.Overrides,
 		Labels:     entry.Labels,
 		DependsOn:  entry.DependsOn,
@@ -79,10 +83,11 @@ func FromComponent(component Component, source string) ComponentTreeComponent {
 		Domain:     component.Domain,
 		Enabled:    component.Enabled,
 		Path:       component.Path,
-		Subscribe:  component.Subscribe,
-		Env:        component.Env,
-		SecretEnv:  component.SecretEnv,
-		Parameters: component.Parameters,
+		Subscribe:         component.Subscribe,
+		Env:               component.Env,
+		SecretEnv:         component.SecretEnv,
+		OptionalSecretEnv: component.OptionalSecretEnv,
+		Parameters:        component.Parameters,
 		Overrides:  component.Overrides,
 		Labels:     component.Labels,
 		DependsOn:  component.DependsOn,

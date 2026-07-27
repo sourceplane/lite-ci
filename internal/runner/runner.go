@@ -1541,6 +1541,11 @@ func (r *Runner) resolveJobSecrets(job model.PlanJob) (map[string]string, error)
 	}
 	for _, ref := range job.SecretRefs {
 		if _, ok := resolved[ref.AsEnv]; !ok {
+			// An optional (best-effort) reference may simply not exist yet —
+			// the wire-now-seed-later shape. Skipped: no env var, no failure.
+			if ref.Optional {
+				continue
+			}
 			return nil, fmt.Errorf("secret resolver returned no value for %s", ref.AsEnv)
 		}
 	}
