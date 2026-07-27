@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 
 	"github.com/sourceplane/orun/internal/flow"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 var (
@@ -19,25 +18,25 @@ var (
 	workflowRunResume      string
 )
 
-// workflowCmd is the standalone authoring on-ramp for torkflow workflows
-// (specs/orun-workflows WF6): validate / digest / run / view a workflow file
+// workflowCmd is the standalone authoring on-ramp for orun workflows
+// (specs/orun-workflows-v3): validate / digest / run / view a workflow file
 // directly, before dropping it into a `workflow:` plan step or blueprint hook.
-// run and view front the pinned engine, sharing WF0's engine-resolution path.
+// Everything runs in-process — there is no external engine (design §11).
 var workflowCmd = &cobra.Command{
 	Use:   "workflow",
-	Short: "Validate, digest, run, or view a torkflow workflow file",
-	Long: `Author and debug torkflow workflows standalone, before wiring them into a
+	Short: "Validate, digest, run, or view an orun workflow file",
+	Long: `Author and debug orun workflows standalone, before wiring them into a
 workflow: plan step or blueprint hook.
 
-  orun workflow validate <file>   check the file parses as a torkflow workflow
+  orun workflow validate <file>   fully validate the workflow file
   orun workflow digest   <file>   print the content digest orun would pin
-  orun workflow run      <file>   run it through the pinned engine (ORUN_TORKFLOW_ENGINE)
-  orun workflow view     <file>   render its DAG via the pinned engine`,
+  orun workflow run      <file>   run it in-process
+  orun workflow view     <file>   render its DAG`,
 }
 
 var workflowValidateCmd = &cobra.Command{
 	Use:   "validate <file>",
-	Short: "Check a workflow file parses as a torkflow workflow",
+	Short: "Fully validate an orun workflow file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWorkflowValidate(cmd, args[0])
@@ -63,30 +62,16 @@ var workflowDigestCmd = &cobra.Command{
 
 var workflowRunCmd = &cobra.Command{
 	Use:   "run <file>",
-	Short: "Run a workflow through the pinned engine",
+	Short: "Run a workflow in-process",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWorkflowRun(cmd.Context(), cmd, args[0])
 	},
 }
 
-var workflowEngineDigestCmd = &cobra.Command{
-	Use:   "engine-digest",
-	Short: "Print the resolved workflow engine's content digest (for intent execution.workflowEngine)",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		eng, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), eng.Digest())
-		return nil
-	},
-}
-
 var workflowViewCmd = &cobra.Command{
 	Use:   "view <file>",
-	Short: "Render a workflow's DAG via the pinned engine",
+	Short: "Render a workflow's DAG",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWorkflowView(cmd.Context(), cmd, args[0])
@@ -99,7 +84,6 @@ func registerWorkflowCommand(root *cobra.Command) {
 	workflowCmd.AddCommand(workflowDigestCmd)
 	workflowCmd.AddCommand(workflowRunCmd)
 	workflowCmd.AddCommand(workflowViewCmd)
-	workflowCmd.AddCommand(workflowEngineDigestCmd)
 
 	workflowRunCmd.Flags().StringArrayVar(&workflowRunSet, "set", nil, "Set a workflow input as key=value (repeatable)")
 	workflowRunCmd.Flags().StringArrayVar(&workflowRunConnections, "connection", nil, "Grant a connection field as name.field=value (repeatable)")

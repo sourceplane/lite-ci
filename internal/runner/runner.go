@@ -20,7 +20,6 @@ import (
 	"github.com/sourceplane/orun/internal/redact"
 	"github.com/sourceplane/orun/internal/secretref"
 	"github.com/sourceplane/orun/internal/ui"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 // IsolationMode controls how each job's working tree is materialized.
@@ -96,17 +95,6 @@ type Runner struct {
 	Executor           executor.Executor
 	Runtime            executor.RuntimeContext
 	ExecID             string
-	// WorkflowEngine runs `workflow:` steps (orun-workflows WF2). A workflow step
-	// runs through this engine regardless of the selected runner (local/docker/
-	// gha). Nil-safe: when a plan contains a workflow: step and this is nil, the
-	// runner resolves the pinned engine from ORUN_TORKFLOW_ENGINE at first use and
-	// errors clearly if none is configured (S-4). Tests inject a fake.
-	WorkflowEngine workflowbackend.Engine
-	// WorkflowEnginePin is the plan's declared engine digest
-	// (plan.spec.workflowEngine.digest, orun-workflows-v2 §6). When set, the
-	// resolved engine's content digest must match or workflow steps fail closed
-	// — "which engine ran this" is plan content, not ambient host state.
-	WorkflowEnginePin string
 	// PlanID is the plan checksum short-form, injected as ORUN_PLAN_ID into
 	// every step environment. Also used to build ORUN_JOB_RUN_ID.
 	PlanID           string

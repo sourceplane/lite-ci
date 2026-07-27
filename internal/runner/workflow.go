@@ -5,56 +5,51 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
-// runWorkflowStep executes a `workflow:` plan step through the workflow backend
-// (orun-workflows WF2). It resolves the pinned engine, verifies the workflow's
-// digest still matches what the plan pinned, invokes it, and returns a
-// human-readable summary of the run as the step output — sealed into .orun/ by
-// the caller via the same AfterStepLog path as any other step (§7). A workflow
-// that fails yields a non-nil error so the step is marked failed and honors the
-// job's onFailure/retry policy (§8).
+// runWorkflowStep executes a `workflow:` plan step through the in-process flow
+// engine (orun-workflows-v3 WA5 — no external engine, no boundary). It verifies
+// the workflow's digest still matches what the plan pinned, loads and runs it,
+// and returns a human-readable summary of the run as the step output — sealed
+// into .orun/ by the caller via the same AfterStepLog path as any other step
+// (§7). A workflow that fails yields a non-nil error so the step is marked
+// failed and honors the job's onFailure/retry policy (§8).
 func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep, resume bool) (string, map[string]any, error) {
-	eng, err := r.workflowEngine()
-	if err != nil {
-		return "", nil, err
+	path := r.resolveWorkflowPath(execCtx, step.Workflow)
+
+	// Digest guard (design §5/§7): the plan pinned the file's content digest at
+	// compile time; refuse to run a file that changed since — fail-closed.
+	if step.WorkflowDigest != "" {
+		onDisk, err := flow.Digest(path)
+		if err != nil {
+			return "", nil, fmt.Errorf("workflow step %q: %w", step.Name, err)
+		}
+		if onDisk != step.WorkflowDigest {
+			return "", nil, fmt.Errorf("workflow %s changed since it was pinned: on-disk %s != pinned %s", path, onDisk, step.WorkflowDigest)
+		}
 	}
 
-	// The connections grant (orun-workflows-v2 §4): resolve exactly the refs the
-	// plan granted, keyed by the workflow's own connection names. The job's wider
-	// SecretEnv never crosses the boundary (invariant 10). Values stay in-memory
-	// and are masked by the runner's single redaction site.
+	wf, err := flow.Load(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("workflow step %q: %w", step.Name, err)
+	}
+
+	// The connections grant (design §9): resolve exactly the refs the plan
+	// granted, keyed by the workflow's own connection names. The job's wider
+	// SecretEnv never crosses into the engine (invariant 10). Values stay
+	// in-memory and are masked by the runner's single redaction site.
 	connections, err := buildConnectionPayloads(job, step, execCtx.SecretEnv)
 	if err != nil {
 		return "", nil, err
 	}
 
-	spec := workflowbackend.StepSpec{
-		WorkflowPath:   r.resolveWorkflowPath(execCtx, step.Workflow),
-		ExpectedDigest: step.WorkflowDigest,
-		With:           step.With,
-		Connections:    connections,
-		RunDir:         r.workflowRunDir(execCtx, job, step),
-		// Resume-from-failed-step (orun-workflows-v2 §8): only on a retry
-		// attempt of a step that opted in. Digest guards hold within a run —
-		// the same pinned workflow and engine served the failed attempt.
-		Resume: resume,
-		Metadata: map[string]any{
-			"jobId":          job.ID,
-			"component":      job.Component,
-			"environment":    job.Environment,
-			"step":           step.Name,
-			"workflowRef":    step.Workflow,
-			"workflowDigest": step.WorkflowDigest,
-		},
-	}
-
-	// Approval gate (orun-workflows-v2 §9): pause BEFORE invoking the engine.
+	// Approval gate (orun-workflows-v2 §9): pause BEFORE running the workflow.
 	// The pause and the verdict are sealed run facts; a rejected or
 	// fail-on-timeout gate fails the step without the workflow ever running.
 	approvalNote, err := r.awaitStepApproval(execCtx, job, step)
@@ -62,26 +57,79 @@ func (r *Runner) runWorkflowStep(execCtx executor.ExecContext, job model.PlanJob
 		return "", nil, err
 	}
 
-	res, err := workflowbackend.RunStep(execCtx.Context, eng, spec)
+	// Per-step run root under the workspace's .orun tree (§6): the engine's
+	// file-backed run state lands here, so a retry attempt that opted into
+	// resume (§8) can re-enter the same run and re-execute only what did not
+	// succeed.
+	runRoot := r.workflowRunDir(execCtx, job, step)
+	execID := ""
+	if resume && runRoot != "" {
+		execID = latestFlowExecID(runRoot)
+	}
+
+	res, err := flow.Run(execCtx.Context, wf, flow.RunOptions{
+		Dir:         filepath.Dir(path),
+		Inputs:      step.With,
+		Connections: connections,
+		RunRoot:     runRoot,
+		ExecID:      execID,
+		Digest:      step.WorkflowDigest,
+	})
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("workflow step %q: %w", step.Name, err)
 	}
 	output := approvalNote + formatWorkflowResult(step, res)
-	if !res.Succeeded() {
-		msg := res.Error
-		if msg == "" {
-			msg = "workflow reported status " + res.Status
-		}
-		return output, nil, fmt.Errorf("workflow step %q failed: %s", step.Name, msg)
+	if res.Status != "succeeded" {
+		return output, nil, fmt.Errorf("workflow step %q failed: %s", step.Name, workflowFailureReason(res))
 	}
 	return output, res.Outputs, nil
+}
+
+// latestFlowExecID finds the most recent flow run recorded under runRoot, so a
+// resume attempt re-enters the failed run's state. Empty when none exists — the
+// retry then simply runs fresh.
+func latestFlowExecID(runRoot string) string {
+	entries, err := os.ReadDir(runRoot)
+	if err != nil {
+		return ""
+	}
+	best := ""
+	var bestMod int64 = -1
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		info, ierr := os.Stat(filepath.Join(runRoot, e.Name(), "metadata.json"))
+		if ierr != nil {
+			continue
+		}
+		if mod := info.ModTime().UnixNano(); mod > bestMod {
+			best, bestMod = e.Name(), mod
+		}
+	}
+	return best
+}
+
+// workflowFailureReason renders a one-line reason from the failed/blocked steps.
+func workflowFailureReason(res *flow.RunResult) string {
+	var parts []string
+	for _, name := range sortedStepNames(res.Steps) {
+		st := res.Steps[name]
+		if st.Status == "failed" && st.Error != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", name, st.Error))
+		}
+	}
+	if len(parts) == 0 {
+		return "workflow reported status " + res.Status
+	}
+	return strings.Join(parts, "; ")
 }
 
 // substituteWorkflowOutputs resolves ${{ steps.X.outputs.Y }} references in a
 // step's executable fields from the outputs earlier workflow steps of this job
 // recorded (orun-workflows-v2 §5). The compiler validated the grammar against
 // declared names; a reference that still cannot resolve at run time (the
-// producing step skipped, or an engine under-delivered) fails the step closed.
+// producing step skipped, or a workflow under-delivered) fails the step closed.
 func substituteWorkflowOutputs(step model.PlanStep, outputs map[string]map[string]any) (model.PlanStep, error) {
 	lookup := func(stepID, name string) (string, bool) {
 		outs, ok := outputs[stepID]
@@ -95,10 +143,10 @@ func substituteWorkflowOutputs(step model.PlanStep, outputs map[string]map[strin
 		return fmt.Sprint(value), true
 	}
 	var err error
-	if step.Run, err = workflowbackend.SubstituteOutputRefs(step.Run, lookup); err != nil {
+	if step.Run, err = flow.SubstituteOutputRefs(step.Run, lookup); err != nil {
 		return step, fmt.Errorf("step %q: %w", step.Name, err)
 	}
-	if step.Use, err = workflowbackend.SubstituteOutputRefs(step.Use, lookup); err != nil {
+	if step.Use, err = flow.SubstituteOutputRefs(step.Use, lookup); err != nil {
 		return step, fmt.Errorf("step %q: %w", step.Name, err)
 	}
 	step.Env, err = substituteInMap(step.Env, lookup)
@@ -121,7 +169,7 @@ func substituteInMap(m map[string]interface{}, lookup func(string, string) (stri
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
 		if s, ok := v.(string); ok {
-			substituted, err := workflowbackend.SubstituteOutputRefs(s, lookup)
+			substituted, err := flow.SubstituteOutputRefs(s, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -133,31 +181,10 @@ func substituteInMap(m map[string]interface{}, lookup func(string, string) (stri
 	return out, nil
 }
 
-// workflowEngine returns the injected engine, or lazily resolves the pinned
-// engine from the environment, caching it on the runner. A run whose steps
-// declare no workflow: never calls this, so a missing engine is not an error for
-// ordinary plans (S-4). When the plan declares an engine pin, the resolved
-// engine's content digest must match — fail-closed (orun-workflows-v2 §6).
-func (r *Runner) workflowEngine() (workflowbackend.Engine, error) {
-	eng := r.WorkflowEngine
-	if eng == nil {
-		resolved, err := workflowbackend.ResolveEngine(workflowbackend.EngineOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("cannot run workflow step: %w", err)
-		}
-		eng = resolved
-	}
-	if pin := strings.TrimSpace(r.WorkflowEnginePin); pin != "" && eng.Digest() != pin {
-		return nil, fmt.Errorf("workflow engine digest %s does not match the plan's declared pin %s (intent execution.workflowEngine) — refusing to run", eng.Digest(), pin)
-	}
-	r.WorkflowEngine = eng
-	return eng, nil
-}
-
-// workflowRunDir provisions the per-step scratch directory the engine keeps its
-// run state in (orun-workflows-v2 §6): an input to sealing under the workspace's
+// workflowRunDir provisions the per-step run root the flow engine keeps its
+// file-backed run state in (§6): an input to sealing under the workspace's
 // .orun tree, never the durable record. Best-effort — an empty string lets the
-// engine fall back to its own temp dir.
+// engine fall back to its default run root.
 func (r *Runner) workflowRunDir(execCtx executor.ExecContext, job model.PlanJob, step model.PlanStep) string {
 	base := execCtx.WorkspaceDir
 	if base == "" {
@@ -206,9 +233,9 @@ func (r *Runner) resolveWorkflowPath(execCtx executor.ExecContext, ref string) s
 // credential payloads: for each granted connection, each field's secret://
 // reference is looked up among the job's SecretRefs and resolved from the job's
 // already-resolved SecretEnv. Only granted refs are injected — an unmapped
-// secret provably never crosses (orun-workflows-v2 §4, invariant 10). A grant
-// referencing a secret the job does not carry is a launch error, fail-closed.
-func buildConnectionPayloads(job model.PlanJob, step model.PlanStep, secretEnv map[string]string) (map[string]any, error) {
+// secret provably never crosses (design §9, invariant 10). A grant referencing
+// a secret the job does not carry is a launch error, fail-closed.
+func buildConnectionPayloads(job model.PlanJob, step model.PlanStep, secretEnv map[string]string) (map[string]map[string]string, error) {
 	if len(step.Connections) == 0 {
 		return nil, nil
 	}
@@ -216,9 +243,9 @@ func buildConnectionPayloads(job model.PlanJob, step model.PlanStep, secretEnv m
 	for _, sr := range job.SecretRefs {
 		refToEnv[sr.Ref] = sr.AsEnv
 	}
-	out := make(map[string]any, len(step.Connections))
+	out := make(map[string]map[string]string, len(step.Connections))
 	for conn, fields := range step.Connections {
-		payload := make(map[string]any, len(fields))
+		payload := make(map[string]string, len(fields))
 		for field, ref := range fields {
 			asEnv, ok := refToEnv[ref]
 			if !ok {
@@ -235,26 +262,34 @@ func buildConnectionPayloads(job model.PlanJob, step model.PlanStep, secretEnv m
 	return out, nil
 }
 
-// formatWorkflowResult renders a readable summary of a workflow run for the step
-// log. Any secret values in the summary are masked by the runner's single
+// sortedStepNames returns the run's step names in stable order.
+func sortedStepNames(steps map[string]*flow.StepState) []string {
+	names := make([]string, 0, len(steps))
+	for name := range steps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// formatWorkflowResult renders a readable summary of a workflow run for the
+// step log. Any secret values in the summary are masked by the runner's single
 // redaction site before the output reaches any sink.
-func formatWorkflowResult(step model.PlanStep, res workflowbackend.Result) string {
+func formatWorkflowResult(step model.PlanStep, res *flow.RunResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "workflow %s: %s\n", step.Workflow, res.Status)
-	for _, s := range res.Steps {
+	for _, name := range sortedStepNames(res.Steps) {
+		s := res.Steps[name]
 		if s.Error != "" {
-			fmt.Fprintf(&b, "  - %s: %s (%s)\n", s.Name, s.Status, s.Error)
+			fmt.Fprintf(&b, "  - %s: %s (%s)\n", name, s.Status, s.Error)
 		} else {
-			fmt.Fprintf(&b, "  - %s: %s\n", s.Name, s.Status)
+			fmt.Fprintf(&b, "  - %s: %s\n", name, s.Status)
 		}
 	}
 	if len(res.Outputs) > 0 {
 		if out, err := json.MarshalIndent(res.Outputs, "", "  "); err == nil {
 			fmt.Fprintf(&b, "outputs:\n%s\n", out)
 		}
-	}
-	if res.Error != "" {
-		fmt.Fprintf(&b, "error: %s\n", res.Error)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

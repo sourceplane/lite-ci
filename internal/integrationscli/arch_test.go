@@ -10,8 +10,8 @@ import (
 )
 
 // providerAPIHostnames are provider API endpoints that must never appear in
-// this package (design.md §5, extending the workflowbackend ecosystem-literal
-// invariant): this surface talks to orun-cloud through configsurface/
+// this package (design.md §5, the ecosystem-literal invariant the deleted
+// engine boundary used to carry): this surface talks to orun-cloud through configsurface/
 // remotestate, never to provider APIs directly. Provider *names* may appear as
 // data (descriptors are data); provider *hostnames* may not. The one
 // grandfathered SDK exception stays internal/cloudflare (orun backend/

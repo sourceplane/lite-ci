@@ -2,14 +2,16 @@ package runner
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sourceplane/orun/internal/approval"
 	"github.com/sourceplane/orun/internal/executor"
+	"github.com/sourceplane/orun/internal/flow"
 	"github.com/sourceplane/orun/internal/model"
-	"github.com/sourceplane/orun/internal/workflowbackend"
 )
 
 func fastPoll(t *testing.T) {
@@ -19,49 +21,70 @@ func fastPoll(t *testing.T) {
 	t.Cleanup(func() { approvalPollInterval = prev })
 }
 
-func gatedStep(digest string) model.PlanStep {
+// writeGatedWF drops a workflow that leaves a marker file when it runs — the
+// observable stand-in for "the engine was invoked" now that the engine is
+// in-process.
+func writeGatedWF(t *testing.T) (dir, digest, marker string) {
+	t.Helper()
+	dir = t.TempDir()
+	marker = filepath.Join(dir, "ran.txt")
+	body := `apiVersion: orun.dev/v1
+kind: Workflow
+metadata: { name: gated }
+inputs:
+  marker: { type: string, required: true }
+steps:
+  - name: mark
+    run: ["touch", "{{ inputs.marker }}"]
+`
+	if err := os.WriteFile(filepath.Join(dir, "wf.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, flow.DigestBytes([]byte(body)), marker
+}
+
+func gatedStep(digest, marker string) model.PlanStep {
 	return model.PlanStep{
 		Name: "promote", Workflow: "wf.yaml", WorkflowDigest: digest,
+		With:     map[string]interface{}{"marker": marker},
 		Approval: &model.StepApproval{Prompt: "ship?", Timeout: "100ms", OnTimeout: "fail"},
 	}
 }
 
-func newGatedRunner(dir string) (*Runner, *fakeWFEngine) {
-	eng := &fakeWFEngine{res: workflowbackend.Result{Status: workflowbackend.StatusSuccess}}
-	r := &Runner{WorkflowEngine: eng, ExecID: "exec-a", Stdout: &strings.Builder{}}
-	_ = dir
-	return r, eng
+func workflowRan(marker string) bool {
+	_, err := os.Stat(marker)
+	return err == nil
 }
 
 func TestApprovalTimeoutFailPolicy(t *testing.T) {
 	fastPoll(t)
-	dir, digest := writeWF(t)
-	r, eng := newGatedRunner(dir)
+	dir, digest, marker := writeGatedWF(t)
+	r := &Runner{ExecID: "exec-a", Stdout: &strings.Builder{}}
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
 
-	_, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, gatedStep(digest), false)
+	_, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, gatedStep(digest, marker), false)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("onTimeout=fail must fail the step: %v", err)
 	}
-	if eng.gotReq.Workflow != "" {
-		t.Fatalf("engine must not run on a failed gate")
+	if workflowRan(marker) {
+		t.Fatalf("workflow must not run on a failed gate")
 	}
 }
 
 func TestApprovalTimeoutProceedPolicy(t *testing.T) {
 	fastPoll(t)
-	dir, digest := writeWF(t)
-	r, eng := newGatedRunner(dir)
+	dir, digest, marker := writeGatedWF(t)
+	r := &Runner{ExecID: "exec-a", Stdout: &strings.Builder{}}
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
-	step := gatedStep(digest)
+	step := gatedStep(digest, marker)
 	step.Approval.OnTimeout = "proceed"
 
 	out, _, err := r.runWorkflowStep(ec, model.PlanJob{ID: "j"}, step, false)
 	if err != nil {
 		t.Fatalf("onTimeout=proceed must run the workflow: %v", err)
 	}
-	if eng.gotReq.Workflow == "" {
-		t.Fatalf("engine should have run after policy-proceed")
+	if !workflowRan(marker) {
+		t.Fatalf("workflow should have run after policy-proceed")
 	}
 	if !strings.Contains(out, "policy:onTimeout=proceed") {
 		t.Fatalf("the policy verdict must seal into the step output: %q", out)
@@ -70,10 +93,10 @@ func TestApprovalTimeoutProceedPolicy(t *testing.T) {
 
 func TestApprovalApprovedRuns(t *testing.T) {
 	fastPoll(t)
-	dir, digest := writeWF(t)
-	r, eng := newGatedRunner(dir)
+	dir, digest, marker := writeGatedWF(t)
+	r := &Runner{ExecID: "exec-a", Stdout: &strings.Builder{}}
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
-	step := gatedStep(digest)
+	step := gatedStep(digest, marker)
 	step.Approval.Timeout = "5s"
 
 	go func() {
@@ -87,17 +110,17 @@ func TestApprovalApprovedRuns(t *testing.T) {
 	if !strings.Contains(out, "approved by sam") {
 		t.Fatalf("verdict must seal into the output: %q", out)
 	}
-	if eng.gotReq.Workflow == "" {
-		t.Fatalf("engine should have run after approval")
+	if !workflowRan(marker) {
+		t.Fatalf("workflow should have run after approval")
 	}
 }
 
 func TestApprovalRejectedFailsWithoutRunning(t *testing.T) {
 	fastPoll(t)
-	dir, digest := writeWF(t)
-	r, eng := newGatedRunner(dir)
+	dir, digest, marker := writeGatedWF(t)
+	r := &Runner{ExecID: "exec-a", Stdout: &strings.Builder{}}
 	ec := executor.ExecContext{Context: context.Background(), WorkspaceDir: dir}
-	step := gatedStep(digest)
+	step := gatedStep(digest, marker)
 	step.Approval.Timeout = "5s"
 
 	go func() {
@@ -108,8 +131,8 @@ func TestApprovalRejectedFailsWithoutRunning(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rejected by sam") {
 		t.Fatalf("rejected gate must fail the step: %v", err)
 	}
-	if eng.gotReq.Workflow != "" {
-		t.Fatalf("engine must not run on rejection")
+	if workflowRan(marker) {
+		t.Fatalf("workflow must not run on rejection")
 	}
 }
 

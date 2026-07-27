@@ -33,6 +33,19 @@ func LoadIntent(path string) (*model.Intent, error) {
 		return nil, fmt.Errorf("failed to parse intent YAML: %w", err)
 	}
 
+	// The workflow-engine pin died with the external engine boundary. Intent
+	// parsing is otherwise lenient, so probe for the removed block explicitly —
+	// silently ignoring a pin someone believes is enforced would be worse than
+	// failing (no compatibility window, WA0 decision).
+	var probe struct {
+		Execution map[string]any `yaml:"execution"`
+	}
+	if err := yaml.Unmarshal(data, &probe); err == nil {
+		if _, declared := probe.Execution["workflowEngine"]; declared {
+			return nil, fmt.Errorf("intent execution.workflowEngine is removed (orun-workflows-v3 design §12): workflow steps run in-process, so the engine's digest is the orun binary's digest — delete the block")
+		}
+	}
+
 	return &intent, nil
 }
 

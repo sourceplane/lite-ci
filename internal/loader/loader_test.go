@@ -3,6 +3,7 @@ package loader
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sourceplane/orun/internal/model"
@@ -254,5 +255,43 @@ spec:
 	}
 	if len(secondComp.Env) != len(expected) {
 		t.Errorf("cached load: Env has %d keys, want %d: %v", len(secondComp.Env), len(expected), secondComp.Env)
+	}
+}
+
+func TestLoadIntentRejectsWorkflowEnginePin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "intent.yaml")
+	writeTestFile(t, path, `apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: pinned
+execution:
+  workflowEngine:
+    ref: ghcr.io/acme/torkflow:v1
+    digest: sha256:abc
+groups: {}
+environments: {}
+components: []
+`)
+	_, err := LoadIntent(path)
+	if err == nil || !strings.Contains(err.Error(), "workflowEngine is removed (orun-workflows-v3 design §12)") {
+		t.Fatalf("a declared engine pin must fail intent loading with the removal notice, got: %v", err)
+	}
+
+	// An intent with execution.state but no pin still loads.
+	okPath := filepath.Join(dir, "ok.yaml")
+	writeTestFile(t, okPath, `apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: plain
+execution:
+  state:
+    mode: local
+groups: {}
+environments: {}
+components: []
+`)
+	if _, err := LoadIntent(okPath); err != nil {
+		t.Fatalf("intent without a pin must load: %v", err)
 	}
 }
