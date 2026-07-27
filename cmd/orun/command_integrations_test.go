@@ -18,12 +18,12 @@ import (
 // ── positional grammar ───────────────────────────────────────────────────────
 
 func TestParseIntegrationsSecretArgsHappyPath(t *testing.T) {
-	provider, key, err := parseIntegrationsSecretArgs([]string{"cloudflare", "secret", "create", "CF_TOKEN"})
+	key, err := parseIntegrationsSecretArgs([]string{"cloudflare", "secret", "create", "CF_TOKEN"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if provider != "cloudflare" || key != "CF_TOKEN" {
-		t.Fatalf("provider=%q key=%q", provider, key)
+	if key != "CF_TOKEN" {
+		t.Fatalf("key=%q", key)
 	}
 }
 
@@ -33,16 +33,14 @@ func TestParseIntegrationsSecretArgsRejectsBadGrammar(t *testing.T) {
 		args          []string
 		wantErrSubstr string
 	}{
-		{"missing resource", []string{"cloudflare"}, "missing resource"},
 		{"missing verb", []string{"cloudflare", "secret"}, "missing verb"},
 		{"missing key", []string{"cloudflare", "secret", "create"}, "missing <KEY>"},
-		{"unknown resource", []string{"cloudflare", "secrets", "create", "K"}, `unknown resource "secrets"`},
 		{"unknown verb", []string{"cloudflare", "secret", "creat", "K"}, `unknown verb "creat"`},
 		{"extra arg", []string{"cloudflare", "secret", "create", "K", "extra"}, `unexpected argument "extra"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := parseIntegrationsSecretArgs(tc.args)
+			_, err := parseIntegrationsSecretArgs(tc.args)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -54,21 +52,65 @@ func TestParseIntegrationsSecretArgsRejectsBadGrammar(t *testing.T) {
 }
 
 // A typo'd static word must suggest the real one — the secrets tree's
-// "did you mean" dialect extends to the new namespace (SP-A7).
+// "did you mean" dialect extends to the new namespace (SP-A7). Resource-level
+// words are dispatched in RunE, so they are exercised through the registered
+// tree; verb-level words through the parser.
 func TestParseIntegrationsSecretArgsSuggestsOnTypo(t *testing.T) {
-	_, _, err := parseIntegrationsSecretArgs([]string{"cloudflare", "secrt", "create", "K"})
+	root := &cobra.Command{Use: "orun", SilenceUsage: true, SilenceErrors: true}
+	registerIntegrationsCommand(root)
+	root.SetArgs([]string{"integrations", "cloudflare", "secrt", "create", "K"})
+	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "did you mean:") || !strings.Contains(err.Error(), "secret") {
 		t.Fatalf("expected a 'did you mean: secret' suggestion, got:\n%s", err)
 	}
-	_, _, err = parseIntegrationsSecretArgs([]string{"cloudflare", "secret", "craete", "K"})
+	_, err = parseIntegrationsSecretArgs([]string{"cloudflare", "secret", "craete", "K"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "did you mean:") || !strings.Contains(err.Error(), "create") {
 		t.Fatalf("expected a 'did you mean: create' suggestion, got:\n%s", err)
+	}
+}
+
+// The dispatcher's resource-level grammar: missing resource, unknown resource
+// (with suggestion), and the templates tree's fail-fast gates — all BEFORE
+// any auth or network.
+func TestIntegrationsDispatcherGrammar(t *testing.T) {
+	run := func(args ...string) error {
+		root := &cobra.Command{Use: "orun", SilenceUsage: true, SilenceErrors: true}
+		registerIntegrationsCommand(root)
+		root.SetArgs(args)
+		return root.Execute()
+	}
+	cases := []struct {
+		name          string
+		args          []string
+		wantErrSubstr string
+	}{
+		{"missing resource", []string{"integrations", "cloudflare"}, "missing resource"},
+		{"unknown resource", []string{"integrations", "cloudflare", "secrets", "create", "K"}, `unknown resource "secrets"`},
+		{"unknown resource suggests templates", []string{"integrations", "cloudflare", "template", "list"}, "did you mean:"},
+		{"list takes no args", []string{"integrations", "list", "extra"}, `unexpected argument "extra"`},
+		{"status takes no args", []string{"integrations", "cloudflare", "status", "extra"}, `unexpected argument "extra"`},
+		{"templates missing verb", []string{"integrations", "cloudflare", "templates"}, "missing verb"},
+		{"templates unknown verb", []string{"integrations", "cloudflare", "templates", "creat", "x"}, "did you mean:"},
+		{"templates create missing id", []string{"integrations", "cloudflare", "templates", "create"}, "missing <ID>"},
+		{"templates create missing flags", []string{"integrations", "cloudflare", "templates", "create", "my-tpl"}, "--base"},
+		{"templates retire missing id", []string{"integrations", "cloudflare", "templates", "retire"}, "missing <ID>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := run(tc.args...)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Fatalf("error %q does not mention %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
 	}
 }
 

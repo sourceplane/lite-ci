@@ -63,7 +63,7 @@ func maybeMountDynamicIntegrations(integrationsCmd *cobra.Command, state *integr
 func mountDynamicIntegrations(integrationsCmd *cobra.Command, state *integrationsDynamicState, cache *integrationscli.CachedRegistry) {
 	state.cache = cache
 	state.stale = cache.Stale(time.Now())
-	registerBuiltinIntegrationExtensions(func() *integrationscli.CachedRegistry { return state.cache })
+	registerBuiltinIntegrationExtensions(cache, func() *integrationscli.CachedRegistry { return state.cache })
 	deps := integrationscli.Deps{
 		SecretCreate: newDynamicSecretCreateCommand,
 		Exec: func(cmd *cobra.Command, inv *integrationscli.Invocation) error {
@@ -81,9 +81,17 @@ func mountDynamicIntegrations(integrationsCmd *cobra.Command, state *integration
 // from the cached descriptor.
 var builtinIntegrationExtensionsOnce sync.Once
 
-func registerBuiltinIntegrationExtensions(load func() *integrationscli.CachedRegistry) {
+func registerBuiltinIntegrationExtensions(cache *integrationscli.CachedRegistry, load func() *integrationscli.CachedRegistry) {
 	builtinIntegrationExtensionsOnce.Do(func() {
 		integrationscli.RegisterExtension("cloudflare", integrationscli.NewRecipeCommand("cloudflare", load))
+		// Console-parity verbs on every mounted provider: the scope-template
+		// manage/authoring tree (SP4) and the connection status view. Served
+		// verbs win on a name collision, so a future server-declared
+		// `templates`/`status` verb supersedes these cleanly.
+		for _, descriptor := range cache.Registry {
+			integrationscli.RegisterExtension(descriptor.Provider, newTemplatesExtensionCommand(descriptor.Provider))
+			integrationscli.RegisterExtension(descriptor.Provider, newStatusExtensionCommand(descriptor.Provider))
+		}
 	})
 }
 
