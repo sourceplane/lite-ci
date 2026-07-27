@@ -75,21 +75,25 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 		return fmt.Errorf("run: timed out (killed): %s", argv[0])
 	}
 	if err != nil {
-		var ee *exec.ExitError
-		if isExitError(err, &ee) {
-			return fmt.Errorf("run: %s exited %d: %s", argv[0], st.ExitCode, tailOf(st.Stderr))
+		if _, ok := err.(*exec.ExitError); ok {
+			return &ExitErr{Argv0: argv[0], Code: st.ExitCode, StderrTail: tailOf(st.Stderr)}
 		}
 		return fmt.Errorf("run: %w", err)
 	}
 	return nil
 }
 
-func isExitError(err error, target **exec.ExitError) bool {
-	ee, ok := err.(*exec.ExitError)
-	if ok {
-		*target = ee
-	}
-	return ok
+// ExitErr is a run: step's non-zero exit — distinct from "could not execute"
+// so poll: can treat it as an evaluable attempt (gh pr checks exits non-zero
+// while checks are pending) rather than a terminal fault.
+type ExitErr struct {
+	Argv0      string
+	Code       int
+	StderrTail string
+}
+
+func (e *ExitErr) Error() string {
+	return fmt.Sprintf("run: %s exited %d: %s", e.Argv0, e.Code, e.StderrTail)
 }
 
 // limitWriter caps captured output at 4 MiB per stream — a step result is a
