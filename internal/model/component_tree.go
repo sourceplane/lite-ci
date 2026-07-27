@@ -30,13 +30,16 @@ type ComponentTreeDiscovery struct {
 
 // ComponentTreeComponent stores a single component entry in the discovery cache.
 type ComponentTreeComponent struct {
-	Name        string                 `yaml:"name" json:"name"`
-	Type        string                 `yaml:"type" json:"type"`
-	Domain      string                 `yaml:"domain,omitempty" json:"domain,omitempty"`
-	Enabled     bool                   `yaml:"enabled" json:"enabled"`
-	Path        string                 `yaml:"path,omitempty" json:"path,omitempty"`
-	Subscribe   ComponentSubscribe     `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
-	Env         map[string]string      `yaml:"env,omitempty" json:"env,omitempty"`
+	Name      string             `yaml:"name" json:"name"`
+	Type      string             `yaml:"type" json:"type"`
+	Domain    string             `yaml:"domain,omitempty" json:"domain,omitempty"`
+	Enabled   bool               `yaml:"enabled" json:"enabled"`
+	Path      string             `yaml:"path,omitempty" json:"path,omitempty"`
+	Subscribe ComponentSubscribe `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
+	Env       map[string]string  `yaml:"env,omitempty" json:"env,omitempty"`
+	// SecretEnv maps env var names to secret:// references (never values —
+	// references are opaque content, safe in the discovery cache).
+	SecretEnv   map[string]string      `yaml:"secretEnv,omitempty" json:"secretEnv,omitempty"`
 	Parameters  map[string]interface{} `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 	Overrides   ComponentOverrides     `yaml:"overrides,omitempty" json:"overrides,omitempty"`
 	Labels      map[string]string      `yaml:"labels,omitempty" json:"labels,omitempty"`
@@ -58,6 +61,7 @@ func (entry ComponentTreeComponent) ToComponent() Component {
 		Path:       entry.Path,
 		Subscribe:  entry.Subscribe,
 		Env:        entry.Env,
+		SecretEnv:  entry.SecretEnv,
 		Parameters: entry.Parameters,
 		Overrides:  entry.Overrides,
 		Labels:     entry.Labels,
@@ -77,6 +81,7 @@ func FromComponent(component Component, source string) ComponentTreeComponent {
 		Path:       component.Path,
 		Subscribe:  component.Subscribe,
 		Env:        component.Env,
+		SecretEnv:  component.SecretEnv,
 		Parameters: component.Parameters,
 		Overrides:  component.Overrides,
 		Labels:     component.Labels,
