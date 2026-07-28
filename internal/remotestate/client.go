@@ -19,6 +19,10 @@ import (
 
 const (
 	defaultReadTimeout = 30 * time.Second
+	// The lease-bound resolve is the herd point of fan-out deploys; it gets a
+	// wider budget and a few transport retries (see ResolveRunSecrets).
+	resolveReadTimeout = 120 * time.Second
+	resolveMaxAttempts = 3
 	logUploadTimeout   = 60 * time.Second
 	connectTimeout     = 5 * time.Second
 	maxRetryAttempts   = 3
@@ -554,16 +558,41 @@ func (c *Client) ReadLog(ctx context.Context, runID, jobID string, fromSeq int) 
 // the live lease (runID, jobID, runnerID, leaseEpoch) independently, walks the
 // scope chain per ref, decrypts, audits, and returns TTL'd plaintext. Fail
 // closed: any error (including 409 lease_lost and typed policy denials) means
-// the dependent job must not start. Not retried — a resolve is lease-bound
-// and the caller re-claims on lease loss.
+// the dependent job must not start.
+//
+// Budget: the resolve is the herd point of a fan-out deploy (every lane hits
+// it at job start, per environment group), so it gets its OWN client with a
+// wider read timeout than the default 30s, and transport-level timeouts are
+// retried a few times with backoff — a resolve is an idempotent read; the
+// lease stays valid across attempts.
 func (c *Client) ResolveRunSecrets(ctx context.Context, runID, jobID, runnerID string, leaseEpoch int, refs, optionalRefs []string) (*ResolvedSecrets, error) {
 	path := c.statePath("/runs/" + urlSegment(runID) + "/secrets/resolve")
 	req := ResolveSecretsRequest{RunnerID: runnerID, JobID: jobID, LeaseEpoch: leaseEpoch, Refs: refs, OptionalRefs: optionalRefs}
-	var resp ResolvedSecrets
-	if err := c.doJSON(ctx, http.MethodPost, path, req, &resp, false); err != nil {
-		return nil, fmt.Errorf("resolve secrets for job %s: %w", jobID, err)
+	resolveClient := &http.Client{Transport: c.httpClient.Transport, Timeout: resolveReadTimeout}
+	var lastErr error
+	for attempt := 0; attempt < resolveMaxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff(attempt)):
+			}
+		}
+		var resp ResolvedSecrets
+		err := c.doJSONOnce(ctx, resolveClient, http.MethodPost, path, req, &resp)
+		if err == nil {
+			return &resp, nil
+		}
+		lastErr = err
+		// Only transport-shaped failures retry (timeouts, connection resets).
+		// Typed API responses — policy denials, lease_lost, validation — are
+		// final; retrying them cannot change the answer.
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			break
+		}
 	}
-	return &resp, nil
+	return nil, fmt.Errorf("resolve secrets for job %s: %w", jobID, lastErr)
 }
 
 // PublishJobOutputSecrets posts a leased job's declared output secrets
