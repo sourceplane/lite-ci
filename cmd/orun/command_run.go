@@ -629,7 +629,7 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// and disable the local dependency check. The claim returns the lease
 	// tunables; stash the heartbeat interval for OnJobStart.
 	if r.JobID != "" {
-		interval, err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color)
+		interval, err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color, runRetry)
 		if err != nil {
 			return err
 		}
@@ -799,6 +799,7 @@ func performRemoteJobClaim(
 	runnerID string,
 	stdout interface{ Write([]byte) (int, error) },
 	color bool,
+	retryRun bool,
 ) (time.Duration, error) {
 	job := findJobByIDInPlan(plan, jobID)
 	if job.ID == "" {
@@ -847,6 +848,23 @@ func performRemoteJobClaim(
 
 		switch {
 		case result.DepsBlocked:
+			// Resume runs (--retry): a blocked claim usually means an upstream
+			// failed in a PRIOR attempt — and in a `gh run rerun --failed` that
+			// upstream is being re-run by its own lane, which may not have
+			// claimed yet (matrix scheduling, max-parallel staggering). Keep
+			// polling until the dep deadline instead of dying on the race; a
+			// dep that genuinely stays failed surfaces as the timeout below.
+			if retryRun {
+				if time.Now().After(deadline) {
+					return 0, fmt.Errorf("job %s: dependency wait timeout (%s) exceeded — upstream dependencies still blocked or failed after the retry grace", jobID, depWaitTimeout)
+				}
+				fmt.Fprintf(stdout, "  %s dependencies of %s failed in a prior attempt — waiting for their retry lanes...\n",
+					ui.Dim(color, "○"), jobID)
+				if waitErr := sleepOrDone(ctx, delay); waitErr != nil {
+					return 0, waitErr
+				}
+				break
+			}
 			return 0, fmt.Errorf("job %s: upstream dependencies are blocked or failed; cannot proceed", jobID)
 		case strings.EqualFold(result.CurrentStatus, "success"):
 			fmt.Fprintf(stdout, "  %s job %s already completed by another runner\n",
@@ -862,7 +880,7 @@ func performRemoteJobClaim(
 			}
 			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
 				ui.Dim(color, "○"), jobID)
-			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline)
+			waitErr := waitForJobRunnable(ctx, backend, runID, jobID, job.DependsOn, plan, delay, deadline, retryRun)
 			if waitErr != nil && !errors.Is(waitErr, errDepHeartbeatStale) {
 				return 0, waitErr
 			}
@@ -906,7 +924,7 @@ var errDepHeartbeatStale = errors.New("dependency heartbeat stale")
 // deps lists the job's declared dependencies; on each poll that doesn't find the
 // job, LoadRunState is called to detect upstream failures early and avoid waiting
 // the full depWaitTimeout when a dependency has already failed or is permanently blocked.
-func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time) error {
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, deps []string, plan *model.Plan, initialDelay time.Duration, deadline time.Time, retryRun bool) error {
 	const pollMax = 15 * time.Second
 	const heartbeatTimeout = 5 * time.Minute // matches coordinator HEARTBEAT_TIMEOUT_MS
 	if initialDelay <= 0 {
@@ -939,11 +957,22 @@ func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID
 						continue
 					}
 					if js.Status == "failed" {
+						// Resume runs (--retry): the dep's own retry lane may
+						// re-open it (JOB_RETRIED) — treat "failed" as
+						// still-pending and keep waiting until the deadline.
+						if retryRun {
+							continue
+						}
 						return fmt.Errorf("job %s: dependency %s failed", jobID, dep)
 					}
 					// A "pending" dep that is transitively blocked (one of its own deps
 					// failed) will never become runnable — fail fast rather than waiting.
+					// On resume runs the failed ancestor may itself be retried, so the
+					// chain can re-open from the root: keep waiting there too.
 					if js.Status == "pending" && plan != nil && isTransitivelyBlocked(execState, plan, dep) {
+						if retryRun {
+							continue
+						}
 						return fmt.Errorf("job %s: dependency %s is permanently blocked (upstream failure)", jobID, dep)
 					}
 					// When a "running" dep's heartbeat has expired, exit the wait loop
