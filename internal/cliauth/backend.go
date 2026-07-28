@@ -631,6 +631,27 @@ func BrowserLogin(ctx context.Context, backendURL, version string, out io.Writer
 			}
 			continue
 		}
+		if apiErr.Status == http.StatusTooManyRequests ||
+			strings.EqualFold(apiErr.Code, "rate_limited") {
+			// api-edge throttles the identity scope aggressively; a 429
+			// mid-poll is transient, not a denial — and it can land on the
+			// very poll that would redeem an already-approved grant. Honor
+			// Retry-After when present, never polling faster than the
+			// browser cadence, and keep going: the loop is already bounded
+			// by the grant deadline. (Mirrors the device-flow handling.)
+			transportFails = 0
+			wait := apiErr.RetryAfter
+			if wait < browserPollInterval {
+				wait = browserPollInterval
+			}
+			if !sleepCtx(loginCtx, wait) {
+				if errors.Is(loginCtx.Err(), context.DeadlineExceeded) {
+					return nil, fmt.Errorf("browser login timed out")
+				}
+				return nil, loginCtx.Err()
+			}
+			continue
+		}
 		return nil, fmt.Errorf("redeem Orun login: %w", err)
 	}
 }

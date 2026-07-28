@@ -54,6 +54,12 @@ type platformAuthServer struct {
 	// whose connection is dropped without a response.
 	browserDropFirst int
 
+	// browserRateLimitFirst is the number of cli/token (grantType cli_code)
+	// polls that return 429 rate_limited (Retry-After: 1) before normal
+	// pending/approved handling resumes — mimics api-edge throttling the
+	// identity scope on the very poll that would redeem an approved grant.
+	browserRateLimitFirst int
+
 	// refresh rotation state.
 	currentRefresh string
 	rotateTo       string
@@ -117,7 +123,15 @@ func newPlatformAuthServer(t *testing.T) *platformAuthServer {
 				dropConn(w)
 				return
 			}
-			if int(n) <= p.browserDropFirst+p.browserApproveAfter {
+			if int(n) <= p.browserDropFirst+p.browserRateLimitFirst {
+				// api-edge throttling the identity scope: 429 rate_limited
+				// with a short Retry-After. The CLI must treat this as
+				// transient, not terminal.
+				w.Header().Set("Retry-After", "1")
+				writeError(w, 429, "rate_limited", "Too many requests")
+				return
+			}
+			if int(n) <= p.browserDropFirst+p.browserRateLimitFirst+p.browserApproveAfter {
 				// Pending: platform returns HTTP 400 "Not yet approved".
 				writeError(w, 400, "validation_failed", "Not yet approved")
 				return
@@ -569,6 +583,32 @@ func TestBrowserLogin_TransientTransportErrorsRetried(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&p.browserPolls); got < 4 {
 		t.Errorf("expected at least 4 polls (2 dropped + pending + redeem), got %d", got)
+	}
+}
+
+func TestBrowserLogin_RateLimitedRedeemRetried(t *testing.T) {
+	fileStoreHome(t)
+	p := newPlatformAuthServer(t)
+	p.session = sampleSession()
+	// api-edge throttles the identity scope: the first two cli/token polls
+	// answer 429 rate_limited (Retry-After: 1) — including the poll that
+	// would redeem the already-approved grant. A 429 must NOT be terminal —
+	// the CLI honors Retry-After and keeps polling until redeemed.
+	p.browserRateLimitFirst = 2
+	p.browserApproveAfter = 1 // then one pending poll, then a session
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	creds, err := BrowserLogin(ctx, p.srv.URL, "test", nil, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("BrowserLogin error = %v; a mid-poll 429 rate_limited must not kill the flow", err)
+	}
+	if creds.AccessToken != "access-tok" {
+		t.Errorf("AccessToken = %q, want access-tok", creds.AccessToken)
+	}
+	// 2 rate-limited polls + 1 pending + 1 redeem.
+	if got := atomic.LoadInt32(&p.browserPolls); got < 4 {
+		t.Errorf("expected at least 4 polls (2 throttled + pending + redeem), got %d", got)
 	}
 }
 
