@@ -67,14 +67,25 @@ type CoordBackend struct {
 	mu     sync.Mutex
 	leases map[string]int    // jobID -> leaseEpoch
 	hashes map[string]string // jobID -> jobInputHash (set when a hermetic job is claimed)
+	// retryJobs marks jobs whose claim should carry retry=true (the --retry
+	// re-open of a failed job when resuming one execution across CI reruns).
+	retryJobs map[string]bool
 }
 
 var _ Backend = (*CoordBackend)(nil)
 
+// MarkRetry flags a job so its next claim carries retry=true — the explicit
+// re-open of a terminally-failed job when a CI rerun resumes one execution.
+func (b *CoordBackend) MarkRetry(jobID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.retryJobs[jobID] = true
+}
+
 // NewCoordBackend wires the native coordination client over an inner backend
 // (used for InitRun, logs, and read-model loads).
 func NewCoordBackend(coord *CoordClient, inner *RemoteStateBackend, runnerID string) *CoordBackend {
-	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}, hashes: map[string]string{}}
+	return &CoordBackend{coord: coord, inner: inner, runnerID: runnerID, leases: map[string]int{}, hashes: map[string]string{}, retryJobs: map[string]bool{}}
 }
 
 // InitRun creates/joins the run via the inner backend. When the server runs the
@@ -90,7 +101,10 @@ func (b *CoordBackend) ClaimJob(ctx context.Context, runID string, job model.Pla
 	if runnerID == "" {
 		runnerID = b.runnerID
 	}
-	req := ClaimRequest{RunnerID: runnerID}
+	b.mu.Lock()
+	retry := b.retryJobs[job.ID]
+	b.mu.Unlock()
+	req := ClaimRequest{RunnerID: runnerID, Retry: retry}
 	if isHermetic(job) {
 		// Memoizable: send the input-hash KEY so the server can resolve a prior
 		// result (the digest is the server's to choose, never the client's), and

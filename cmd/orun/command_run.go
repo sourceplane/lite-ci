@@ -551,7 +551,14 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// still delegate to the inner REST client (same backend, not the old plane).
 	if !strings.EqualFold(os.Getenv("ORUN_COORDINATION"), "legacy") {
 		coord := &statebackend.CoordClient{BaseURL: client.ScopedStateBaseURL(), TokenSource: tokenSrc}
-		backend = statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
+		cb := statebackend.NewCoordBackend(coord, remoteBackend, runnerID)
+		// --retry re-opens the selected job when it already FAILED in this
+		// execution (a CI rerun resuming the same exec-id); the claim carries
+		// retry=true and the server's JOB_RETRIED re-open does the rest.
+		if runRetry && runJobID != "" {
+			cb.MarkRetry(runJobID)
+		}
+		backend = cb
 	}
 
 	source := "cli"
