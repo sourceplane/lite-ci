@@ -103,6 +103,10 @@ type ClaimRequest struct {
 	RunnerID     string
 	Hermetic     bool
 	JobInputHash string
+	// Retry re-opens a terminally-FAILED (or timed-out) job as a fresh claim —
+	// the `orun run --job X --retry` shape a CI rerun uses to resume one
+	// execution. Succeeded jobs stay terminal server-side regardless.
+	Retry bool
 }
 
 // Claim posts a :claim and decodes the outcome into the driver's ClaimOutcome.
@@ -113,6 +117,9 @@ func (c *CoordClient) Claim(ctx context.Context, runID, jobID string, req ClaimR
 	}
 	if req.JobInputHash != "" {
 		body["jobInputHash"] = req.JobInputHash
+	}
+	if req.Retry {
+		body["retry"] = true
 	}
 	resp, err := c.do(ctx, http.MethodPost,
 		fmt.Sprintf("/runs/%s/jobs/%s:claim", runID, jobID), body)
