@@ -726,6 +726,9 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		// Lease-bound secret resolve (orun-secrets SEC3): called after the
 		// claim, before the job's first step; fail-closed on any error.
 		ResolveJobSecrets: remoteSecretResolver(ctx, r, client, backend, handle.RunID, runnerID, os.Stderr, r.Color),
+		// SEC-JOB: publish a successful job's declared output secrets over the
+		// same lease-bound channel the resolve uses.
+		PublishJobOutputs: remoteJobOutputPublisher(ctx, client, backend, handle.RunID, runnerID),
 	}
 
 	// Deploy-time materialization (orun-secrets SEC6): wire the CF adapter (from

@@ -80,6 +80,10 @@ type RunnerHooks struct {
 	// layer for this job only, and every value is registered with the
 	// redactor first (specs/orun-secrets/runner-integration.md §1).
 	ResolveJobSecrets func(jobID string, refs []model.PlanSecretRef) (map[string]string, error)
+	// PublishJobOutputs posts a successful job's declared output secrets over
+	// the run's lease-bound channel (SEC-JOB). Wired by cmd/orun on remote
+	// runs; nil on local runs (produced outputs are then reported + skipped).
+	PublishJobOutputs func(jobID string, secrets map[string]string) error
 }
 
 type Runner struct {
@@ -822,6 +826,25 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *execmodel.JobState, exe
 				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 			})
 			fmt.Fprintf(r.Stderr, "  %s %s: materialize failed: %v\n", ui.Red(r.Color, "✗"), job.ID, matErr)
+			summary.addFailed()
+			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+			}
+		}
+	}
+
+	// Job output secrets (SEC-JOB): after the job's steps succeed, publish the
+	// values its steps wrote to the $ORUN_SECRET_OUTPUTS sink. Failure is loud:
+	// a wiring value that silently failed to land breaks every consumer later.
+	if !r.DryRun && !jobFailed {
+		if pubErr := r.publishJobOutputSecrets(job); pubErr != nil {
+			jobFailed = true
+			r.updateState(persistState, execState, func() {
+				jobState.Status = "failed"
+				jobState.LastError = fmt.Sprintf("secret outputs: %v", pubErr)
+				jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			})
+			fmt.Fprintf(r.Stderr, "  %s %s: secret outputs failed: %v\n", ui.Red(r.Color, "✗"), job.ID, pubErr)
 			summary.addFailed()
 			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
 				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
@@ -1706,6 +1729,14 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 		if tfEnv := r.TfBackendEnv(stepContext, job.Component, job.Environment); len(tfEnv) > 0 {
 			execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, tfEnv)
 		}
+	}
+	// Job output secrets (SEC-JOB): jobs that declare publishable keys get the
+	// sink path — steps append KEY=value / KEY<<DELIM entries; the runner
+	// parses, allow-lists, redacts, and publishes after the job succeeds.
+	if len(jobSecretOutputKeys(job)) > 0 {
+		execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, map[string]string{
+			"ORUN_SECRET_OUTPUTS": r.jobSecretOutputsSinkPath(job),
+		})
 	}
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.SecretEnv = secretEnv

@@ -566,6 +566,28 @@ func (c *Client) ResolveRunSecrets(ctx context.Context, runID, jobID, runnerID s
 	return &resp, nil
 }
 
+// PublishJobOutputSecrets posts a leased job's declared output secrets
+// (SEC-JOB): POST …/runs/{ulid}/output-secrets. The platform derives the
+// target scope (project/env rung, component) from the leased job itself —
+// nothing here names a scope.
+func (c *Client) PublishJobOutputSecrets(ctx context.Context, runID, jobID, runnerID string, leaseEpoch int, secrets map[string]string) error {
+	path := c.statePath("/runs/" + urlSegment(runID) + "/output-secrets")
+	entries := make([]map[string]string, 0, len(secrets))
+	for key, value := range secrets {
+		entries = append(entries, map[string]string{"key": key, "value": value})
+	}
+	req := map[string]interface{}{
+		"runnerId":   runnerID,
+		"jobId":      jobID,
+		"leaseEpoch": leaseEpoch,
+		"secrets":    entries,
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path, req, nil, false); err != nil {
+		return fmt.Errorf("publish output secrets for job %s: %w", jobID, err)
+	}
+	return nil
+}
+
 // ── internal helpers ──────────────────────────────────────────────────────────
 
 // doJSON executes a JSON API call. When retryable is true, idempotent 5xx

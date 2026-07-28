@@ -136,3 +136,18 @@ func attachLocalSecretResolver(r *runner.Runner) {
 		return out, nil
 	}
 }
+
+// remoteJobOutputPublisher wires the SEC-JOB publish hook: a successful job's
+// declared output secrets go over the run's lease-bound channel; the platform
+// derives the target scope (project/env rung) from the leased job itself.
+// Addressing mirrors remoteSecretResolver (exec id → contract run ULID).
+func remoteJobOutputPublisher(ctx context.Context, client *remotestate.Client, backend statebackend.Backend, runID, runnerID string) func(string, map[string]string) error {
+	wireRunID := remotestate.RunULID(runID)
+	return func(jobID string, secrets map[string]string) error {
+		epoch := 0
+		if cb, ok := backend.(*statebackend.CoordBackend); ok {
+			epoch = cb.LeaseEpoch(jobID)
+		}
+		return client.PublishJobOutputSecrets(ctx, wireRunID, jobID, runnerID, epoch, secrets)
+	}
+}
