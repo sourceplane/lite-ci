@@ -727,6 +727,64 @@ func DeviceLogin(ctx context.Context, backendURL, version string, out io.Writer)
 	}
 }
 
+// refreshLockAcquireTimeout bounds the wait for the cross-process refresh lock
+// when the caller's context carries no deadline of its own.
+const refreshLockAcquireTimeout = 30 * time.Second
+
+// RefreshSessionLocked is the cross-process-safe refresh critical section:
+// take the refresh lock, RE-READ the persisted session under it, and skip the
+// redemption entirely when a sibling process already rotated the token while
+// we waited (its access token is fresh — reuse it). Only when the re-read
+// still shows an expired access token is the rotating refresh token redeemed
+// and the result persisted, all before the lock is released.
+//
+// skew treats an access token expiring within that window as already expired,
+// so callers do not start work with a token that dies mid-flight.
+//
+// The lock is best-effort: when it cannot be acquired the refresh proceeds
+// unserialized (still correct, no longer race-free) rather than failing the
+// command.
+func RefreshSessionLocked(ctx context.Context, backendURL, version string, skew time.Duration) (*Credentials, error) {
+	lockCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		lockCtx, cancel = context.WithTimeout(ctx, refreshLockAcquireTimeout)
+		defer cancel()
+	}
+	if lock, lockErr := AcquireRefreshLock(lockCtx); lockErr == nil {
+		defer func() { _ = lock.Release() }()
+	}
+
+	// Double-checked reload under the lock: a sibling may have refreshed while
+	// we waited. Reuse its token rather than replaying our spent refresh token
+	// (redeeming a spent rotating token trips reuse-detection and revokes the
+	// whole family).
+	creds, err := LoadSession()
+	if err != nil {
+		return nil, err
+	}
+	if creds == nil {
+		return nil, os.ErrNotExist
+	}
+	if creds.AccessToken != "" && !accessTokenExpired(creds, skew) {
+		return creds, nil
+	}
+	if strings.TrimSpace(creds.RefreshToken) == "" {
+		return nil, ErrSessionRevoked
+	}
+	return RefreshSession(ctx, backendURL, version, creds)
+}
+
+// accessTokenExpired reports whether the access token is expired or expires
+// within skew. A missing expiry is treated as non-expiring.
+func accessTokenExpired(creds *Credentials, skew time.Duration) bool {
+	exp := creds.AccessExpiryTime()
+	if exp.IsZero() {
+		return false
+	}
+	return time.Now().Add(skew).After(exp)
+}
+
 // RefreshSession refreshes the local CLI session using the rotating,
 // single-use refresh token. On success it persists the NEW refresh token
 // returned by the platform (the old one is now spent). When the platform

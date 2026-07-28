@@ -355,7 +355,23 @@ type defaultCredentialStore struct {
 	file     *fileCredentialStore
 }
 
+// Load/Save/Clear hold the cross-process store lock (shared read, exclusive
+// write): the keychain update (`security -U`) has a delete/re-add window and
+// the keychain→file fallback is a two-step transition — an unguarded reader in
+// either window sees "not logged in", or worse, stale credentials whose
+// rotating refresh token was already spent (redeeming it revokes the family).
+
 func (s *defaultCredentialStore) Load() (*Credentials, error) {
+	var creds *Credentials
+	err := withStoreLock(false, func() error {
+		var loadErr error
+		creds, loadErr = s.loadLocked()
+		return loadErr
+	})
+	return creds, err
+}
+
+func (s *defaultCredentialStore) loadLocked() (*Credentials, error) {
 	if s.keychain.available() {
 		creds, err := s.keychain.Load()
 		if err == nil {
@@ -369,29 +385,40 @@ func (s *defaultCredentialStore) Load() (*Credentials, error) {
 }
 
 func (s *defaultCredentialStore) Save(creds *Credentials) error {
-	if s.keychain.available() {
-		if err := s.keychain.Save(creds); err == nil {
-			_ = s.file.Clear()
-			return nil
+	return withStoreLock(true, func() error {
+		if s.keychain.available() {
+			if err := s.keychain.Save(creds); err == nil {
+				_ = s.file.Clear()
+				return nil
+			}
+			// Keychain rejected the write (locked, denied, transient): fall back
+			// to the file — and best-effort drop the keychain entry, which now
+			// holds SUPERSEDED credentials. Load prefers the keychain, so a
+			// surviving stale entry would shadow the fresh file and the next
+			// refresh would redeem an already-spent rotating token, revoking the
+			// whole session family.
+			_ = s.keychain.Clear()
 		}
-	}
-	return s.file.Save(creds)
+		return s.file.Save(creds)
+	})
 }
 
 func (s *defaultCredentialStore) Clear() error {
-	var errs []error
-	if s.keychain.available() {
-		if err := s.keychain.Clear(); err != nil && !errors.Is(err, os.ErrNotExist) {
+	return withStoreLock(true, func() error {
+		var errs []error
+		if s.keychain.available() {
+			if err := s.keychain.Clear(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, err)
+			}
+		}
+		if err := s.file.Clear(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
-	}
-	if err := s.file.Clear(); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
-	}
-	if len(errs) == 0 {
-		return nil
-	}
-	return errs[0]
+		if len(errs) == 0 {
+			return nil
+		}
+		return errs[0]
+	})
 }
 
 type keychainCredentialStore struct{}
@@ -491,10 +518,33 @@ func (s *fileCredentialStore) Save(creds *Credentials) error {
 	if err != nil {
 		return fmt.Errorf("marshal credentials: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Atomic replace (temp + rename): a concurrent reader must never observe a
+	// truncated credentials file — a torn read parses as "not logged in" or, if
+	// it drops only the refresh token, as a session that cannot renew.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*.json")
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	return os.Chmod(path, 0o600)
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 func (s *fileCredentialStore) Clear() error {

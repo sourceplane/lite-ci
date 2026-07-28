@@ -33,6 +33,24 @@ func flockExclusive(ctx context.Context, f *os.File) error {
 	}
 }
 
+// flockShared takes a shared lock (LockFileEx without the exclusive flag),
+// polling like flockExclusive so ctx is honored.
+func flockShared(ctx context.Context, f *os.File) error {
+	h := windows.Handle(f.Fd())
+	for {
+		var overlapped windows.Overlapped
+		err := windows.LockFileEx(h, windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 func flockUnlock(f *os.File) error {
 	var overlapped windows.Overlapped
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &overlapped)
