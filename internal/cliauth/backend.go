@@ -455,6 +455,18 @@ func (c *BackendClient) CreateLink(ctx context.Context, accessToken, orgID, remo
 	if s := strings.TrimSpace(projectSlug); s != "" {
 		body["projectSlug"] = s
 	}
+	// Rename-stable provider identity: the OIDC exchange resolves CI workflows
+	// by the NUMERIC repo id, so a link without it works for user ops but CI
+	// OIDC 404s (catalog auto-sync, remote state). Best-effort — a link still
+	// succeeds without it, with a loud warning to finish via the console.
+	if identity, err := ResolveGitHubRepoIdentity(ctx, remoteURL); err == nil {
+		body["provider"] = identity.Provider
+		body["providerRepoId"] = identity.RepoID
+		body["providerOwnerId"] = identity.OwnerID
+		body["providerOwnerLogin"] = identity.OwnerLogin
+	} else {
+		fmt.Fprintf(os.Stderr, "⚠ linking without provider repo identity (%v) — CI OIDC will not resolve this link; re-link once a GitHub credential is available, or link via the console\n", err)
+	}
 	var wrapped struct {
 		Link *WorkspaceLink `json:"link"`
 	}
