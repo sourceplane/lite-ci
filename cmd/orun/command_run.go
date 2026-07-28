@@ -733,6 +733,10 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 	// Nil-safe — jobs with no materialize block, or a run with no cloud, are
 	// unaffected.
 	attachMaterialize(r, backendURL, tokenSrc, scope.OrgID, scope.ProjectID)
+	// Terraform HTTP state backend (SB1, de-AWS): TF_HTTP_* per job, addressed
+	// by the resolved (org, project) scope — in CI that is the OIDC-exchange's
+	// token-bound scope, so state paths target exactly what the token allows.
+	attachTfBackend(r, backendURL, tokenSrc, scope.OrgID, scope.ProjectID)
 
 	return nil
 }

@@ -127,6 +127,14 @@ type Runner struct {
 	// record failure warns but never undoes a written value. Nil-safe.
 	MaterializeSyncRecorder materialize.SyncRecorder
 
+	// TfBackendEnv provides the terraform HTTP state-backend env (TF_HTTP_*)
+	// for a job's (component, environment) — the address on the platform state
+	// plane plus the run token as the backend password (SB1, de-AWS). Injected
+	// by cmd/orun on remote runs; the closure re-mints via the token source so
+	// long runs never hand terraform an expired token. Nil-safe: local runs and
+	// non-component jobs get no TF_HTTP_* vars.
+	TfBackendEnv func(ctx context.Context, component, environment string) map[string]string
+
 	// ResumeJobs seeds the run with jobs that already succeeded in a prior run
 	// of the same execution (read from the object graph). Seeded jobs are
 	// skipped — the run re-executes only the jobs that did not succeed, and
@@ -1689,6 +1697,16 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 		"ORUN_COMPONENT":   job.Component,
 	}
 	execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, jobRuntimeEnv)
+	// Terraform HTTP state backend (SB1, de-AWS): when a backend-env provider is
+	// wired (remote runs), every step gets the TF_HTTP_* set addressing THIS
+	// job's (component, environment) state on the platform — terraform's
+	// `backend "http"` reads them directly, so compositions need no
+	// -backend-config plumbing and no AWS credentials step.
+	if r.TfBackendEnv != nil && job.Component != "" && job.Environment != "" {
+		if tfEnv := r.TfBackendEnv(stepContext, job.Component, job.Environment); len(tfEnv) > 0 {
+			execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, tfEnv)
+		}
+	}
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.SecretEnv = secretEnv
 	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
