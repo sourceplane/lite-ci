@@ -226,11 +226,48 @@ func buildOwnership(view *catalogresolve.CatalogView) nodes.ImpactOwnership {
 			dir := path.Dir(cm.Identity.SourceFile)
 			components[dir] = cm.Identity.ComponentKey
 		}
+		// A component may be authored away from the tree it owns: spec.path
+		// naming a dir other than its component.yaml location (e.g.
+		// tools/db-migrate/component.yaml with spec.path
+		// packages/db/src/migrations). Without an entry for the authored dir,
+		// files under it attribute to whatever enclosing component's dir
+		// prefixes them and the component is never scoped into --changed. A
+		// dir already claimed above keeps its dir-resident owner; between two
+		// authored claims the first manifest wins (Manifests is ordered by
+		// componentKey, so ties are deterministic).
+		for _, cm := range view.Manifests {
+			if cm == nil || cm.Identity.Path == "" {
+				continue
+			}
+			dir := ownershipDirFromPath(cm.Identity.Path)
+			if dir == "" {
+				continue
+			}
+			if _, claimed := components[dir]; !claimed {
+				components[dir] = cm.Identity.ComponentKey
+			}
+		}
 	}
 	if len(components) > 0 {
 		o.Components = components
 	}
 	return o
+}
+
+// ownershipDirFromPath normalizes an authored spec.path into the clean,
+// workspace-relative dir form the ownership schema requires
+// (nodes.ImpactOwnership.Validate). Returns "" for a path the map cannot
+// carry: empty, absolute, or escaping the workspace root.
+func ownershipDirFromPath(p string) string {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	if p == "" || strings.HasPrefix(p, "/") {
+		return ""
+	}
+	p = path.Clean(p)
+	if p == ".." || strings.HasPrefix(p, "../") {
+		return ""
+	}
+	return p
 }
 
 // mapEntity reshapes a catalogmodel.ComponentManifest into the Component-kind
