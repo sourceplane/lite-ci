@@ -28,10 +28,6 @@ const (
 	// final ~7% of its life — frequent enough to avoid mid-request expiry,
 	// infrequent enough not to churn the rotating refresh token.
 	refreshSkew = 60 * time.Second
-
-	// refreshLockTimeout bounds how long we wait for the cross-process refresh
-	// lock when the caller's context has no deadline of its own.
-	refreshLockTimeout = 30 * time.Second
 )
 
 // TokenSource resolves the bearer token for backend requests.
@@ -300,44 +296,21 @@ func (s *SessionTokenSource) Token(ctx context.Context) (string, error) {
 	return token.(string), nil
 }
 
-// refreshOnce performs a single, serialized refresh. It takes the cross-process
-// lock, then re-loads the session and re-checks expiry: a sibling process may
-// have rotated the token while we waited, in which case we return its fresh
-// access token without redeeming our (now-spent) refresh token. The lock is
-// best-effort — if it cannot be acquired we still refresh, just unserialized.
+// refreshOnce performs a single, serialized refresh via the shared critical
+// section in cliauth (cross-process lock → re-read → skip-or-redeem →
+// persist): a sibling process may have rotated the token while we waited, in
+// which case its fresh access token is returned without redeeming our
+// (now-spent) refresh token.
 func (s *SessionTokenSource) refreshOnce(ctx context.Context) (string, error) {
-	lockCtx := ctx
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		lockCtx, cancel = context.WithTimeout(ctx, refreshLockTimeout)
-		defer cancel()
-	}
-	if lock, lockErr := cliauth.AcquireRefreshLock(lockCtx); lockErr == nil {
-		defer func() { _ = lock.Release() }()
-	}
-
-	// Double-checked reload under the lock: a sibling may have refreshed while
-	// we waited. Reuse its token rather than replaying our spent refresh token.
-	creds, err := cliauth.LoadSession()
-	if err != nil {
-		return "", err
-	}
-	if creds == nil {
-		return "", os.ErrNotExist
-	}
-	if creds.AccessToken != "" && !tokenExpired(creds.AccessExpiryTime()) {
-		return creds.AccessToken, nil
-	}
-	if strings.TrimSpace(creds.RefreshToken) == "" {
-		return "", cliauth.ErrSessionRevoked
-	}
-
-	refreshed, err := cliauth.RefreshSession(ctx, s.BackendURL, s.Version, creds)
+	refreshed, err := cliauth.RefreshSessionLocked(ctx, s.BackendURL, s.Version, refreshSkew)
 	if err != nil {
 		if errors.Is(err, cliauth.ErrSessionRevoked) {
 			// Session already cleared by RefreshSession; do not wrap so the
 			// caller sees the single actionable message.
 			return "", cliauth.ErrSessionRevoked
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
 		return "", fmt.Errorf("refresh Orun login: %w", err)
 	}
