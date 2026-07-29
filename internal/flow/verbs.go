@@ -65,7 +65,7 @@ func (l *lineStream) flush() {
 // or `$( )` in an argument is a literal; anyone needing a shell writes
 // ["bash", "-lc", ...] explicitly and owns that choice visibly in review.
 // Output is captured for the step result AND streamed line-by-line to log.
-func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, st *StepState, log io.Writer) error {
+func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, st *StepState, log io.Writer, source *SourceMeta) error {
 	argv := make([]string, len(s.Run))
 	for i, a := range s.Run {
 		v, err := Interpolate(a, vars)
@@ -112,6 +112,23 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 				}
 			}
 			env = append(env, k+"="+v)
+		}
+	}
+	// A remotely fetched flow's origin is ambient, non-secret context every
+	// step may need — a self-pinning flow fetches its own baseline at
+	// EXACTLY the commit the flow file came from.
+	if source != nil {
+		if source.Repo != "" {
+			env = append(env, "ORUN_FLOW_SOURCE_REPO="+source.Repo)
+		}
+		if source.Ref != "" {
+			env = append(env, "ORUN_FLOW_SOURCE_REF="+source.Ref)
+		}
+		if source.SHA != "" {
+			env = append(env, "ORUN_FLOW_SOURCE_SHA="+source.SHA)
+		}
+		if source.URL != "" {
+			env = append(env, "ORUN_FLOW_SOURCE_URL="+source.URL)
 		}
 	}
 	// envInherit: named host variables passed through by explicit declaration
