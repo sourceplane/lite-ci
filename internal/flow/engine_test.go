@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -173,5 +174,31 @@ func mustMkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRun_StreamsStepOutputLive(t *testing.T) {
+	// Step output must reach the engine log line-by-line, prefixed with the
+	// step name — before this, a long-polling step looked like a hang and a
+	// failed step never showed its stderr on the terminal.
+	wf := &Workflow{
+		Metadata: Metadata{Name: "stream-test"},
+		Steps: []Step{
+			{Name: "talker", Run: []string{"/bin/sh", "-c", "echo hello-out; echo hello-err >&2"}},
+		},
+	}
+	var log bytes.Buffer
+	res, err := Run(context.Background(), wf, RunOptions{Dir: t.TempDir(), Log: &log})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if res.Status != "succeeded" {
+		t.Fatalf("status = %s, want succeeded", res.Status)
+	}
+	out := log.String()
+	for _, want := range []string{"▸ talker", "talker │ hello-out", "talker │ hello-err"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q; got:\n%s", want, out)
+		}
 	}
 }
