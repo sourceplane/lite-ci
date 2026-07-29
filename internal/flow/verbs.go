@@ -100,6 +100,17 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 	env := []string{}
 	for _, k := range []string{"PATH", "HOME", "TMPDIR"} {
 		if v, ok := os.LookupEnv(k); ok {
+			if k == "PATH" {
+				// Steps that call `orun` must get THE binary running this
+				// workflow, not whatever stale install shadows it on PATH —
+				// a version-skewed nested orun fails in ways that read as
+				// flow bugs ("unknown flag: --org" mid-preflight, live). A
+				// shim dir holding an `orun` symlink to os.Executable() is
+				// prepended; everything else on PATH is untouched.
+				if shim := selfShimDir(runDir); shim != "" {
+					v = shim + string(os.PathListSeparator) + v
+				}
+			}
 			env = append(env, k+"="+v)
 		}
 	}
@@ -143,6 +154,42 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 		return fmt.Errorf("run: %w", err)
 	}
 	return nil
+}
+
+// selfShimDir lazily creates <runDir>/.orun-bin/orun as a symlink to the
+// executable running this workflow and returns the directory, or "" when the
+// executable cannot be resolved (steps then fall back to plain PATH lookup).
+// One shim per run dir; concurrent steps share it.
+var shimMu sync.Mutex
+
+func selfShimDir(runDir string) string {
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(self); err == nil {
+		self = resolved
+	}
+	dir := filepath.Join(runDir, ".orun-bin")
+	// PATH entries must be absolute — a relative entry resolves against each
+	// step's own cwd and silently never matches.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	link := filepath.Join(dir, "orun")
+	shimMu.Lock()
+	defer shimMu.Unlock()
+	if target, err := os.Readlink(link); err == nil && target == self {
+		return dir
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	_ = os.Remove(link)
+	if err := os.Symlink(self, link); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // ExitErr is a run: step's non-zero exit — distinct from "could not execute"
