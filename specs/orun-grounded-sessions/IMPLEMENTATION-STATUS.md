@@ -8,7 +8,7 @@ tracked in `orun-cloud/specs/epics/saas-grounded-sessions/IMPLEMENTATION-STATUS.
 | ID | Milestone | Status |
 |----|-----------|--------|
 | GS0 | Grounded serve | ✅ Shipped |
-| GS1 | `orun git-credential` | 🗓️ Planned |
+| GS1 | `orun git-credential` | ✅ Shipped |
 | GS2 | Workspace-client auth | 🗓️ Planned |
 
 ## Notes
@@ -50,3 +50,37 @@ serve wiring in `cmd/orun/command_agent_serve.go`.
   terminal marker, and credential redaction. No network, no credentials.
   `go build ./...`, `go vet`, and `go test ./cmd/orun/ ./internal/agent/...`
   green.
+
+### GS1 — `orun git-credential` (shipped)
+
+As-built: `internal/agent/ground/token.go` (the door client + cache),
+`cmd/orun/command_git_credential.go` (the helper), and the serve wiring.
+
+- **Pull, not bake, made concrete.** Git authenticates through a helper that
+  mints a repo-scoped token per operation from the session's own door. The
+  helper config rides the *clone command* (`--config credential.helper=…`), so
+  there is no global git state and no window in which a fetch could prompt.
+- **The helper serves its binding and nothing else.** A request for another
+  repository, another host, or plain http gets **silence** — git then falls
+  through to its own helpers rather than failing on our account, and a hostile
+  repo cannot even provoke a mint for somewhere else. The door enforces the
+  same scope server-side; this is the second lock, not the only one.
+- **Refusals are silent on stdout, explained on stderr.** stdout *is* the
+  credential protocol, so a 403 (tier lowered, session terminal) prints
+  nothing and git reports an ordinary auth failure. A 4xx is never retried; a
+  5xx retries three times with backoff.
+- **The cache is the only secret at rest**: `$XDG_RUNTIME_DIR/orun/`, 0600,
+  atomic write, treated as spent 5 minutes before real expiry (a token that
+  dies mid-clone is worse than one minted a minute early). `store` is inert —
+  a credential git offers us is never persisted; `erase` clears it.
+- **`GITHUB_TOKEN` seeding** for `gh`/API tools shares the helper's cache, so
+  boot and the first git operation spend one mint rather than two. It goes
+  stale at the token's TTL by design — git never reads it.
+- The helper reads `ORUN_SESSION_TOKEN`, falling back to `ORUN_TOKEN_FILE`, so
+  it keeps working across a rotation once GS2 lands.
+- Tests: 21 across the door client (path, bearer, terminal-vs-retryable
+  statuses, cache expiry/permissions) and the helper protocol (mint, foreign-
+  request silence, cache reuse, refusal silence, inertness outside a grounded
+  session, store-never-persists, erase). All against an httptest stub of the
+  GS4 wire shape — no network, no credentials. `go build ./...`, `go vet`, and
+  `go test ./cmd/orun/ ./internal/agent/...` green.

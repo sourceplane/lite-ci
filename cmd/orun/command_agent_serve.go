@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sourceplane/orun/internal/agent"
 	"github.com/sourceplane/orun/internal/agent/attach"
@@ -180,7 +181,15 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		workdir := ""
 		if repo := ground.Detect(os.Getenv); repo != nil {
 			fmt.Fprintf(errOut, "orun agent serve: grounding session on %s\n", repo.FullName)
-			dir, gErr := ground.Ground(ctx, repo, ground.Options{Branch: branch, Log: errOut})
+			dir, gErr := ground.Ground(ctx, repo, ground.Options{
+				Branch: branch,
+				Log:    errOut,
+				// GS1: the helper rides the clone command as repo-local config —
+				// no global git state, and no window where a fetch could prompt.
+				// `!` marks it a shell command; git runs it for every operation
+				// on this repo and gets a freshly minted, scoped token back.
+				CredentialHelper: "!" + orunBinaryPath() + " git-credential",
+			})
 			if gErr != nil {
 				fmt.Fprintf(errOut, "orun agent serve: grounding failed: %v\n", gErr)
 				return gErr
@@ -258,7 +267,19 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			if abs, aErr := filepath.Abs(mcpConfigPath); aErr == nil {
 				mcpConfigPath = abs
 			}
-			drv = &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
+			cc := &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
+			// GS1: seed a token for tools that read GITHUB_TOKEN (gh, API
+			// callers). Compatibility only — git itself never reads this; it
+			// goes through the credential helper, which mints per operation and
+			// so never goes stale. This one does, at the token's TTL.
+			if workdir != "" {
+				if tok, tErr := mintHarnessGitToken(ctx); tErr == nil {
+					cc.Env = append(cc.Env, "GITHUB_TOKEN="+tok)
+				} else {
+					fmt.Fprintf(errOut, "orun agent serve: WARNING no GITHUB_TOKEN seeded for the harness (%v) — git still works via the credential helper\n", tErr)
+				}
+			}
+			drv = cc
 		}
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
@@ -294,6 +315,16 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		fmt.Fprintf(errOut, "orun agent serve: session %s ended: %s\n", res.SessionID, res.Outcome.Status)
 		return nil
 	},
+}
+
+// orunBinaryPath is this process's own path — what the git credential helper
+// config invokes. `orun` may not be on the PATH git runs with, so the config
+// names an absolute binary rather than trusting lookup.
+func orunBinaryPath() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	return "orun"
 }
 
 // harnessModelArgs pins the agent type's `model:` frontmatter on the harness
@@ -367,4 +398,27 @@ func registerAgentServeCommand(parent *cobra.Command) {
 	agentServeCmd.Flags().StringVar(&serveTask, "task", "", "task key (defaults to ORUN_TASK_KEY)")
 	agentServeCmd.Flags().StringVar(&serveDriver, "driver", "claude-code", "driver id")
 	parent.AddCommand(agentServeCmd)
+}
+
+// mintHarnessGitToken fetches one repo-scoped token for the harness env
+// (GS1 compatibility seeding). It reuses the credential helper's own cache, so
+// boot and the first git operation share a mint rather than spending two.
+func mintHarnessGitToken(ctx context.Context) (string, error) {
+	session, err := ground.SessionFromEnv(os.Getenv)
+	if err != nil {
+		return "", err
+	}
+	cachePath := ground.CachePath(os.Getenv)
+	if tok, ok := ground.ReadCachedToken(cachePath, time.Now()); ok {
+		return tok.Token, nil
+	}
+	tok, err := ground.MintRepoToken(ctx, nil, session)
+	if err != nil {
+		return "", err
+	}
+	if wErr := ground.WriteCachedToken(cachePath, tok); wErr != nil {
+		// A working token in hand beats a cache.
+		_ = wErr
+	}
+	return tok.Token, nil
 }
