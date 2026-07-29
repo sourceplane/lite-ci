@@ -202,3 +202,26 @@ func TestRun_StreamsStepOutputLive(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_StepsResolveSelfOrun(t *testing.T) {
+	// A step invoking `orun` must resolve THE binary running the workflow
+	// (via the run-dir shim), not whatever stale install shadows it on PATH.
+	wf := &Workflow{
+		Metadata: Metadata{Name: "shim-test"},
+		Steps: []Step{
+			{Name: "which", Run: []string{"/bin/sh", "-c", "command -v orun"}},
+		},
+	}
+	var log bytes.Buffer
+	res, err := Run(context.Background(), wf, RunOptions{Dir: t.TempDir(), Log: &log})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	st := res.Steps["which"]
+	if st == nil || st.Status != "succeeded" {
+		t.Fatalf("step state: %+v", st)
+	}
+	if !strings.Contains(st.Stdout, ".orun-bin/orun") {
+		t.Errorf("step resolved orun outside the shim: %q", st.Stdout)
+	}
+}
