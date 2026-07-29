@@ -88,8 +88,13 @@ GitHub PAT or OAuth token is required.`,
 
 // cloudSessionToken loads the CLI session and returns a fresh access token,
 // failing fast and actionably when the user is not logged in (degradation
-// table row 2: "run `orun auth login`").
+// table row 2: "run `orun auth login`"). Headless environments (containers,
+// CI drivers) authenticate with ORUN_TOKEN instead of a stored session —
+// honored here like everywhere else the CLI resolves auth.
 func cloudSessionToken(ctx context.Context, backendURL string) (string, error) {
+	if token := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); token != "" {
+		return token, nil
+	}
 	creds, err := cliauth.LoadSession()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -115,7 +120,7 @@ func cloudSessionToken(ctx context.Context, backendURL string) (string, error) {
 }
 
 func errNotLoggedIn() error {
-	return fmt.Errorf("not logged in to Orun Cloud; run `orun auth login`")
+	return fmt.Errorf("not logged in to Orun Cloud; run `orun auth login` (or set ORUN_TOKEN for headless runs)")
 }
 
 func runCloudLink() error {
