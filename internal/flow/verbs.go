@@ -8,14 +8,64 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
+
+// streamMu serializes streamed step-output lines across concurrently running
+// steps so lines from parallel steps never interleave mid-line.
+var streamMu sync.Mutex
+
+// lineStream tees step output to the engine log line-by-line, prefixed with
+// the step name, while the buffered capture keeps the full text for
+// outputs/until evaluation. Without this, live progress was invisible — a
+// preflight that legitimately polls for ten minutes read as a hang, and a
+// failed step never showed WHY on the terminal.
+type lineStream struct {
+	dst     io.Writer
+	prefix  string
+	partial bytes.Buffer
+}
+
+func (l *lineStream) Write(p []byte) (int, error) {
+	if l.dst == nil || l.dst == io.Discard {
+		return len(p), nil
+	}
+	l.partial.Write(p)
+	for {
+		b := l.partial.Bytes()
+		i := bytes.IndexByte(b, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(b[:i])
+		l.partial.Next(i + 1)
+		l.emit(line)
+	}
+	return len(p), nil
+}
+
+func (l *lineStream) emit(line string) {
+	streamMu.Lock()
+	fmt.Fprintf(l.dst, "    %s │ %s\n", l.prefix, line)
+	streamMu.Unlock()
+}
+
+// flush emits any trailing partial line once the process has exited.
+func (l *lineStream) flush() {
+	if l.dst == nil || l.dst == io.Discard || l.partial.Len() == 0 {
+		return
+	}
+	l.emit(l.partial.String())
+	l.partial.Reset()
+}
 
 // runExec is the run: verb (design §6): argv only — never a shell — with an
 // env allowlist over a fixed hygienic base, an explicit cwd defaulting to the
 // step's run dir, and the exit/stdout/stderr triple as the step result. A `;`
 // or `$( )` in an argument is a literal; anyone needing a shell writes
 // ["bash", "-lc", ...] explicitly and owns that choice visibly in review.
-func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, st *StepState) error {
+// Output is captured for the step result AND streamed line-by-line to log.
+func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, st *StepState, log io.Writer) error {
 	argv := make([]string, len(s.Run))
 	for i, a := range s.Run {
 		v, err := Interpolate(a, vars)
@@ -73,10 +123,14 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 	cmd.Dir = cwd
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &limitWriter{w: &stdout}
-	cmd.Stderr = &limitWriter{w: &stderr}
+	outStream := &lineStream{dst: log, prefix: s.Name}
+	errStream := &lineStream{dst: log, prefix: s.Name}
+	cmd.Stdout = io.MultiWriter(&limitWriter{w: &stdout}, outStream)
+	cmd.Stderr = io.MultiWriter(&limitWriter{w: &stderr}, errStream)
 
 	err := cmd.Run()
+	outStream.flush()
+	errStream.flush()
 	st.Stdout, st.Stderr = stdout.String(), stderr.String()
 	st.ExitCode = cmd.ProcessState.ExitCode()
 	if ctx.Err() == context.DeadlineExceeded {

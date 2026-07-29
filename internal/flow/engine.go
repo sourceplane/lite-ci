@@ -139,6 +139,7 @@ func Run(ctx context.Context, wf *Workflow, opts RunOptions) (*RunResult, error)
 		go func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			fmt.Fprintf(opts.Log, "  ▸ %s\n", s.Name)
 			st := executeStep(ctx, wf, s, inputs, stepsVar(), opts, runDir)
 			mu.Lock()
 			states[s.Name] = st
@@ -146,6 +147,9 @@ func Run(ctx context.Context, wf *Workflow, opts RunOptions) (*RunResult, error)
 			delete(running, s.Name)
 			mu.Unlock()
 			fmt.Fprintf(opts.Log, "  - %s: %s\n", s.Name, st.Status)
+			if st.Status == "failed" && st.Error != "" {
+				fmt.Fprintf(opts.Log, "      ✕ %s\n", st.Error)
+			}
 			doneCh <- s.Name
 		}()
 	}
@@ -392,7 +396,7 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 
 	switch s.Verb() {
 	case "run":
-		if err := runExec(sctx, s, vars, runDir, st); err != nil {
+		if err := runExec(sctx, s, vars, runDir, st, opts.Log); err != nil {
 			return resultVars, err
 		}
 		resultVars["exitCode"] = st.ExitCode
