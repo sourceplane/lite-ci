@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"path/filepath"
 
 	"github.com/sourceplane/orun/internal/flow"
 )
@@ -107,6 +107,36 @@ func runWorkflowValidate(cmd *cobra.Command, path string) error {
 }
 
 func runWorkflowRun(ctx context.Context, cmd *cobra.Command, path string) error {
+	// Remote refs (github:owner/repo[@ref]//path, https://…) fetch to a temp
+	// file and run from the caller's cwd; the resolved origin reaches every
+	// step as ORUN_FLOW_SOURCE_* so the flow can self-pin its content fetch.
+	var source *flow.SourceMeta
+	dir := filepath.Dir(path)
+	if flow.IsRemoteRef(path) {
+		local, meta, cleanup, err := flow.FetchRemote(ctx, path)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		if meta != nil {
+			ident := meta.URL
+			if meta.Repo != "" {
+				ident = meta.Repo
+				if meta.Ref != "" {
+					ident += "@" + meta.Ref
+				}
+				if meta.SHA != "" {
+					ident += " (" + meta.SHA[:min(12, len(meta.SHA))] + ")"
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "fetched workflow from %s\n", ident)
+		}
+		source = meta
+		path = local
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			dir = cwd
+		}
+	}
 	wf, err := flow.Load(path)
 	if err != nil {
 		return err
@@ -124,12 +154,13 @@ func runWorkflowRun(ctx context.Context, cmd *cobra.Command, path string) error 
 		return err
 	}
 	res, err := flow.Run(ctx, wf, flow.RunOptions{
-		Dir:         filepath.Dir(path),
+		Dir:         dir,
 		Inputs:      inputs,
 		Connections: conns,
 		ExecID:      workflowRunResume,
 		Digest:      digest,
 		Log:         cmd.OutOrStdout(),
+		Source:      source,
 	})
 	if err != nil {
 		return err

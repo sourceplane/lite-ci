@@ -40,11 +40,12 @@ type RunOptions struct {
 	Dir         string // base dir for nested workflow: refs (the file's dir)
 	Inputs      map[string]any
 	Connections map[string]map[string]string
-	RunRoot     string    // default .orun/wfruns
-	ExecID      string    // non-empty: resume this run (digest-checked)
-	Digest      string    // workflow content digest, recorded in run state
-	Log         io.Writer // step progress; nil = silent
-	MaxParallel int       // default 4; workflow file may override
+	RunRoot     string      // default .orun/wfruns
+	ExecID      string      // non-empty: resume this run (digest-checked)
+	Digest      string      // workflow content digest, recorded in run state
+	Log         io.Writer   // step progress; nil = silent
+	MaxParallel int         // default 4; workflow file may override
+	Source      *SourceMeta // remote origin; exported to steps as ORUN_FLOW_SOURCE_*
 	visited     map[string]bool
 }
 
@@ -396,7 +397,7 @@ func runVerbOnce(ctx context.Context, wf *Workflow, s *Step, vars map[string]any
 
 	switch s.Verb() {
 	case "run":
-		if err := runExec(sctx, s, vars, runDir, st, opts.Log); err != nil {
+		if err := runExec(sctx, s, vars, runDir, st, opts.Log, opts.Source); err != nil {
 			return resultVars, err
 		}
 		resultVars["exitCode"] = st.ExitCode
