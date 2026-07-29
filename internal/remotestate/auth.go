@@ -246,6 +246,44 @@ func (s *StaticTokenSource) Token(_ context.Context) (string, error) {
 	return s.token, nil
 }
 
+// FileTokenSource reads a bearer token from a file on every call
+// (orun-grounded-sessions GS2).
+//
+// A grounded sandbox's credential ROTATES — `orun agent serve` refreshes the
+// session token roughly every 15 minutes and rewrites the file. A value cached
+// at process start would therefore be stale by the time a long-lived tool call
+// used it, which is precisely the failure a static env var would have. Reading
+// at call time is the whole point: the file IS the rotation carrier.
+type FileTokenSource struct {
+	Path string
+}
+
+// NewFileTokenSource reads the bearer from path on each Token() call.
+func NewFileTokenSource(path string) *FileTokenSource {
+	return &FileTokenSource{Path: path}
+}
+
+// Token reads and returns the current token. The file must not be readable by
+// group or other — the same discipline the stored CLI session enforces.
+func (s *FileTokenSource) Token(_ context.Context) (string, error) {
+	info, err := os.Stat(s.Path)
+	if err != nil {
+		return "", fmt.Errorf("ORUN_TOKEN_FILE %s: %w", s.Path, err)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return "", fmt.Errorf("ORUN_TOKEN_FILE %s is readable by group/other (mode %o); refusing to use it", s.Path, perm)
+	}
+	b, err := os.ReadFile(s.Path)
+	if err != nil {
+		return "", fmt.Errorf("ORUN_TOKEN_FILE %s: %w", s.Path, err)
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", fmt.Errorf("ORUN_TOKEN_FILE %s is empty", s.Path)
+	}
+	return token, nil
+}
+
 // SessionTokenSource resolves and refreshes a local Orun CLI session token.
 type SessionTokenSource struct {
 	BackendURL string
@@ -353,6 +391,17 @@ func ResolveAuth(ctx context.Context, opts ResolveOptions) (*ResolvedAuth, error
 			TokenSource:  NewStaticTokenSource(token),
 			NamespaceID:  strings.TrimSpace(opts.NamespaceID),
 			ResolvedMode: "static",
+		}, nil
+	}
+	// GS2: a grounded sandbox authenticates as its own session. serve writes
+	// every token rotation to this file, so reading it per call keeps every
+	// in-sandbox `orun` verb on a live credential — and the lease that kills
+	// the session kills this too, with no extra revocation path.
+	if path := strings.TrimSpace(os.Getenv("ORUN_TOKEN_FILE")); path != "" {
+		return &ResolvedAuth{
+			TokenSource:  NewFileTokenSource(path),
+			NamespaceID:  strings.TrimSpace(opts.NamespaceID),
+			ResolvedMode: "file",
 		}, nil
 	}
 	if strings.TrimSpace(opts.BackendURL) == "" {

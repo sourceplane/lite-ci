@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -243,5 +244,73 @@ func TestCachePathIsRuntimeState(t *testing.T) {
 	// Without XDG_RUNTIME_DIR it still lands somewhere writable, never the repo.
 	if fallback := CachePath(func(string) string { return "" }); fallback == "" {
 		t.Error("CachePath returned empty without XDG_RUNTIME_DIR")
+	}
+}
+
+func TestSessionTokenFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orun", "session-token")
+	if err := WriteSessionToken(path, "bearer-one"); err != nil {
+		t.Fatalf("WriteSessionToken: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(b)); got != "bearer-one" {
+		t.Errorf("token = %q", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("mode = %o, want 600", perm)
+	}
+
+	// Rotation overwrites in place: readers re-read per call, so the NEXT
+	// `orun` verb in the sandbox picks the new credential up with no restart.
+	if err := WriteSessionToken(path, "bearer-two"); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	b, _ = os.ReadFile(path)
+	if got := strings.TrimSpace(string(b)); got != "bearer-two" {
+		t.Errorf("after rotation token = %q, want bearer-two", got)
+	}
+}
+
+func TestWriteSessionTokenRefusesEmpty(t *testing.T) {
+	// An empty file would read as "no credential" and send every in-sandbox
+	// verb down the not-logged-in path — worse than leaving the old one.
+	path := filepath.Join(t.TempDir(), "session-token")
+	if err := WriteSessionToken(path, "   "); err == nil {
+		t.Fatal("expected an error writing an empty token")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("an empty token created a file")
+	}
+}
+
+func TestTokenFilePathHonorsExplicitOverride(t *testing.T) {
+	got := TokenFilePath(func(k string) string {
+		if k == "ORUN_TOKEN_FILE" {
+			return "/custom/path"
+		}
+		return ""
+	})
+	if got != "/custom/path" {
+		t.Errorf("TokenFilePath = %q, want the explicit override", got)
+	}
+}
+
+func TestTokenFilePathDefaultsToRuntimeState(t *testing.T) {
+	dir := t.TempDir()
+	got := TokenFilePath(func(k string) string {
+		if k == "XDG_RUNTIME_DIR" {
+			return dir
+		}
+		return ""
+	})
+	if want := filepath.Join(dir, "orun", "session-token"); got != want {
+		t.Errorf("TokenFilePath = %q, want %q", got, want)
 	}
 }

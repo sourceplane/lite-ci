@@ -111,8 +111,19 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		runCtx, runCancel := context.WithCancel(ctx)
 		defer runCancel()
 		fmt.Fprintf(errOut, "orun agent serve: sending first heartbeat — session %s → %s\n", sessionID, relayBase)
+		// GS2: publish every token this session holds — the boot one and each
+		// refresh — so any `orun` verb the harness spawns authenticates as the
+		// live session with no configuration. The lease that kills the session
+		// kills this credential too; there is no second thing to revoke.
+		tokenFile := ground.TokenFilePath(os.Getenv)
+		publishToken := func(tok string) {
+			if wErr := ground.WriteSessionToken(tokenFile, tok); wErr != nil {
+				fmt.Fprintf(errOut, "orun agent serve: WARNING could not publish the session token (%v) — in-sandbox `orun` verbs will not authenticate\n", wErr)
+			}
+		}
+		publishToken(token)
 		hb, hbErr := attach.StartHeartbeat(hbCtx, attach.HeartbeatConfig{
-			BaseURL: relayBase, Token: token, Log: errOut,
+			BaseURL: relayBase, Token: token, Log: errOut, OnToken: publishToken,
 		}, func(reason string) {
 			fmt.Fprintf(errOut, "orun agent serve: session ended by cloud (heartbeat terminal): %s\n", reason)
 			runCancel()
@@ -272,6 +283,13 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			// callers). Compatibility only — git itself never reads this; it
 			// goes through the credential helper, which mints per operation and
 			// so never goes stale. This one does, at the token's TTL.
+			// GS2: the workspace handle + the rotating credential's location, so
+			// `orun cloud check`, state reads, and policy-gated secret resolves
+			// all work in-sandbox with zero flags.
+			cc.Env = append(cc.Env, "ORUN_TOKEN_FILE="+tokenFile)
+			if ws := strings.TrimSpace(os.Getenv("ORUN_WORKSPACE")); ws != "" {
+				cc.Env = append(cc.Env, "ORUN_WORKSPACE="+ws)
+			}
 			if workdir != "" {
 				if tok, tErr := mintHarnessGitToken(ctx); tErr == nil {
 					cc.Env = append(cc.Env, "GITHUB_TOKEN="+tok)

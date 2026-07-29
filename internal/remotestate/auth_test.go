@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -270,5 +271,98 @@ func TestOIDCSource_NoBackendReturnsRawToken(t *testing.T) {
 	token, err := src.Token(context.Background())
 	if err != nil || token != "raw-gh-jwt" {
 		t.Fatalf("no-backend Token = %q, %v (want raw GitHub token)", token, err)
+	}
+}
+
+// GS2: the sandbox's rotating credential arrives as a FILE, not an env var,
+// because a value read once at process start would be stale within ~15 minutes.
+func TestFileTokenSourceReadsPerCall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-token")
+	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src := remotestate.NewFileTokenSource(path)
+
+	got, err := src.Token(context.Background())
+	if err != nil || got != "first" {
+		t.Fatalf("Token() = %q, %v", got, err)
+	}
+
+	// serve rotates the session token and rewrites the file; the very next
+	// call must carry the new one without any restart or re-resolve.
+	if err := os.WriteFile(path, []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = src.Token(context.Background())
+	if err != nil || got != "second" {
+		t.Fatalf("after rotation Token() = %q, %v — the source cached", got, err)
+	}
+}
+
+func TestFileTokenSourceRefusesLoosePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-token")
+	if err := os.WriteFile(path, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remotestate.NewFileTokenSource(path).Token(context.Background()); err == nil {
+		t.Fatal("expected a refusal for a group/other-readable credential file")
+	}
+}
+
+func TestFileTokenSourceErrorsAreLegible(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+	if _, err := remotestate.NewFileTokenSource(missing).Token(context.Background()); err == nil {
+		t.Fatal("expected an error for a missing file")
+	} else if !strings.Contains(err.Error(), "ORUN_TOKEN_FILE") {
+		t.Errorf("error %q does not name the env var an operator would check", err)
+	}
+
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remotestate.NewFileTokenSource(empty).Token(context.Background()); err == nil {
+		t.Fatal("expected an error for an empty credential file")
+	}
+}
+
+func TestResolveAuthPrefersEnvTokenOverFile(t *testing.T) {
+	// ORUN_TOKEN is an operator's deliberate override; the file is the
+	// sandbox's own plumbing. The explicit choice wins.
+	path := filepath.Join(t.TempDir(), "session-token")
+	if err := os.WriteFile(path, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ORUN_TOKEN", "from-env")
+	t.Setenv("ORUN_TOKEN_FILE", path)
+
+	got, err := remotestate.ResolveAuth(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example"})
+	if err != nil {
+		t.Fatalf("ResolveAuth: %v", err)
+	}
+	if got.ResolvedMode != "static" {
+		t.Errorf("mode = %q, want static", got.ResolvedMode)
+	}
+}
+
+func TestResolveAuthUsesTokenFileBeforeLocalSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-token")
+	if err := os.WriteFile(path, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ORUN_TOKEN", "")
+	t.Setenv("ORUN_TOKEN_FILE", path)
+
+	got, err := remotestate.ResolveAuth(context.Background(), remotestate.ResolveOptions{BackendURL: "https://api.example"})
+	if err != nil {
+		t.Fatalf("ResolveAuth: %v", err)
+	}
+	if got.ResolvedMode != "file" {
+		t.Fatalf("mode = %q, want file", got.ResolvedMode)
+	}
+	tok, err := got.TokenSource.Token(context.Background())
+	if err != nil || tok != "from-file" {
+		t.Errorf("token = %q, %v", tok, err)
 	}
 }
