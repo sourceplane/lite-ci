@@ -279,4 +279,5 @@ func init() {
 	registerEpicCommand(rootCmd)
 	registerMcpCommand(rootCmd)
 	registerAgentCommand(rootCmd)
+	registerGitCredentialCommand(rootCmd)
 }
