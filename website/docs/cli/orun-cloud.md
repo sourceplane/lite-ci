@@ -12,6 +12,14 @@ This page covers the CLI surface. The Orun Cloud **platform** — workspaces,
 access control, the API, webhooks, billing, and self-hosting — is documented at
 [docs.orun.dev](https://docs.orun.dev).
 
+:::note Headless / container linking
+`orun cloud link` and `orun cloud check` honor **`ORUN_TOKEN`** before looking
+for a stored CLI session, so headless environments — containers, CI drivers,
+scaffold phase steps — can self-link without `orun auth login`. The
+not-logged-in error says so:
+`not logged in to Orun Cloud; run 'orun auth login' (or set ORUN_TOKEN for headless runs)`.
+:::
+
 :::tip Most teams don't run `orun cloud link` directly
 [`orun auth login`](./orun-auth.md) already authenticates **and auto-links** the
 current repo in one step, and `orun run --remote-state` self-heals an unlinked

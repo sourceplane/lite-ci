@@ -296,6 +296,11 @@ All resolved component parameters after merge (parameterDefaults + component par
 - `.parameters.chartPath`
 - `.parameters.nodeVersion`
 
+One parameter name is meaningful to the runner itself: **`secretOutputs`**
+declares the job's output secrets (`"KEY=hint,KEY2=hint"`) and causes
+`$ORUN_SECRET_OUTPUTS` to be exported to every step — see
+[Secrets → job output secrets](../concepts/secrets.md#secretoutputs--job-output-secrets).
+
 ### `.env` fields
 
 Runtime environment variables declared in intent or component env blocks:
