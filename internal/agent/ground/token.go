@@ -209,3 +209,37 @@ func ClearCachedToken(path string) error {
 	}
 	return nil
 }
+
+// ── The session token file (GS2) ───────────────────────────────────────────
+
+// TokenFilePath is where serve publishes the session bearer for other `orun`
+// processes in the sandbox: runtime state, 0600, never the repo.
+func TokenFilePath(getenv func(string) string) string {
+	if explicit := strings.TrimSpace(getenv("ORUN_TOKEN_FILE")); explicit != "" {
+		return explicit
+	}
+	dir := strings.TrimSpace(getenv("XDG_RUNTIME_DIR"))
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "orun", "session-token")
+}
+
+// WriteSessionToken publishes the current session bearer 0600, atomically.
+//
+// Called on every rotation: the file is the CARRIER of rotation, which is why
+// readers (remotestate.FileTokenSource) re-read per call rather than caching. A
+// static env var would go stale in ~15 minutes; this does not.
+func WriteSessionToken(path, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return errors.New("refusing to write an empty session token")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token+"\n"), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

@@ -9,7 +9,7 @@ tracked in `orun-cloud/specs/epics/saas-grounded-sessions/IMPLEMENTATION-STATUS.
 |----|-----------|--------|
 | GS0 | Grounded serve | ✅ Shipped |
 | GS1 | `orun git-credential` | ✅ Shipped |
-| GS2 | Workspace-client auth | 🗓️ Planned |
+| GS2 | Workspace-client auth | ✅ Shipped |
 
 ## Notes
 
@@ -84,3 +84,35 @@ As-built: `internal/agent/ground/token.go` (the door client + cache),
   session, store-never-persists, erase). All against an httptest stub of the
   GS4 wire shape — no network, no credentials. `go build ./...`, `go vet`, and
   `go test ./cmd/orun/ ./internal/agent/...` green.
+
+### GS2 — Workspace-client auth (shipped)
+
+As-built: `internal/remotestate/auth.go` (`FileTokenSource` + the precedence
+rung), `internal/agent/ground/token.go` (`TokenFilePath`, `WriteSessionToken`),
+`internal/agent/attach/heartbeat.go` (`OnToken`), and the serve wiring.
+
+- **The file is the rotation carrier, so readers re-read per call.** serve
+  refreshes the session token roughly every 15 minutes; a value captured once
+  at process start would be stale before a long tool call used it — the exact
+  failure a static `ORUN_TOKEN` would have had. `FileTokenSource.Token()` reads
+  on every call, and a test rotates the file mid-test to prove the next call
+  carries the new credential.
+- **One credential, not two.** The sandbox reaches the workspace as *the
+  session*, so the lease that kills the session kills state, catalog, and
+  secrets access at the same moment. Nothing new to revoke.
+- **Precedence: `ORUN_TOKEN` > `ORUN_TOKEN_FILE` > OIDC > local session.** An
+  operator's explicit override still wins over the sandbox's own plumbing.
+- **Refuses a group/other-readable file** — the same discipline
+  `cliauth` already enforces on the stored session — and refuses to *write* an
+  empty token, since an empty file reads as "not logged in" and would send
+  every in-sandbox verb down the wrong path.
+- `HeartbeatConfig.OnToken` is the seam: the heartbeat already owned refresh,
+  so publishing is a callback rather than a poller. serve also publishes the
+  boot token (the constructor sets it directly, bypassing the setter).
+- The harness env gains `ORUN_TOKEN_FILE` + `ORUN_WORKSPACE`, so any `orun`
+  verb a tool call spawns authenticates as the session with zero flags.
+- Tests: 9 — per-call re-read across a rotation, permission refusal, legible
+  errors naming `ORUN_TOKEN_FILE`, both precedence rungs, file round-trip with
+  0600 + atomic overwrite, empty-token refusal, and path resolution.
+  `go build ./...`, `go vet`, and `go test ./cmd/orun/ ./internal/agent/...
+  ./internal/remotestate/` green.

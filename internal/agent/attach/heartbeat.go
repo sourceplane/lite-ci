@@ -47,6 +47,12 @@ type HeartbeatConfig struct {
 	HTTP    *http.Client
 	Log     io.Writer
 
+	// OnToken, when set, is called with every token this loop holds — the
+	// boot token and each refresh. GS2 uses it to keep ORUN_TOKEN_FILE current
+	// so every in-sandbox `orun` verb authenticates as the live session. Must
+	// not block; it runs on the beat loop.
+	OnToken func(string)
+
 	Interval       time.Duration // beat cadence (default 5m)
 	RefreshMargin  time.Duration // refresh the token when this close to expiry (default 5m)
 	FirstBeatTries int           // 5xx/network retries for the first beat (default 6)
@@ -90,7 +96,11 @@ func (h *Heartbeat) Token() string {
 func (h *Heartbeat) setToken(tok string) {
 	h.mu.Lock()
 	h.token = tok
+	cb := h.cfg.OnToken
 	h.mu.Unlock()
+	if cb != nil {
+		cb(tok)
+	}
 }
 
 // StartHeartbeat sends the first beat synchronously — the call that flips
