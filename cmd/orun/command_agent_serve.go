@@ -10,6 +10,7 @@ import (
 	"github.com/sourceplane/orun/internal/agent"
 	"github.com/sourceplane/orun/internal/agent/attach"
 	"github.com/sourceplane/orun/internal/agent/driver"
+	"github.com/sourceplane/orun/internal/agent/ground"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/workmcp"
@@ -41,7 +42,14 @@ Identity comes from the sandbox environment (injected by the control plane):
   ORUN_CLOUD_API    the api-edge base URL
   ORUN_ORG_ID       the workspace (org_…) id
   ORUN_SESSION_ID   the as_… session id (overridable with --session)
-  ORUN_SESSION_TOKEN the session bearer (the service-principal credential)`,
+  ORUN_SESSION_TOKEN the session bearer (the service-principal credential)
+
+A grounded session (orun-grounded-sessions GS0) also carries its repository
+binding, and serve clones it before the loop starts:
+  ORUN_REPO_REMOTE    the https clone URL (never carries a credential)
+  ORUN_REPO_FULL_NAME the owner/repo full name
+  ORUN_REPO_REF       the ref to clone at
+Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		errOut := cmd.ErrOrStderr()
@@ -154,6 +162,33 @@ Identity comes from the sandbox environment (injected by the control plane):
 			fmt.Fprintf(errOut, "orun agent serve: event relay connected\n")
 		}
 
+		// The task-keyed branch is a pure function of type+task, so it is
+		// computed here rather than beside RunOptions: grounding needs it to
+		// create the branch, and the loop needs the same string.
+		branch := ""
+		if task != "" {
+			branch = "agent/" + task + "-" + slugify(typeName)
+		}
+
+		// Grounding (GS0): a bound repository becomes a real checkout before
+		// any brief or driver work. It runs AFTER the heartbeat and relay so a
+		// failure here is reportable — the console sees the session fail with
+		// the stage that broke instead of a silent dark box — and BEFORE the
+		// brief so the driver receives the final workdir. A grounded session
+		// that cannot reach its repository is not the session that was asked
+		// for, so this is terminal, never a degrade-to-ungrounded.
+		workdir := ""
+		if repo := ground.Detect(os.Getenv); repo != nil {
+			fmt.Fprintf(errOut, "orun agent serve: grounding session on %s\n", repo.FullName)
+			dir, gErr := ground.Ground(ctx, repo, ground.Options{Branch: branch, Log: errOut})
+			if gErr != nil {
+				fmt.Fprintf(errOut, "orun agent serve: grounding failed: %v\n", gErr)
+				return gErr
+			}
+			workdir = dir
+			fmt.Fprintf(errOut, "orun agent serve: grounded at %s\n", workdir)
+		}
+
 		// Now the (potentially blocking) brief + driver setup — the relay is
 		// already streaming and draining steers regardless of how this goes.
 		//
@@ -215,21 +250,24 @@ Identity comes from the sandbox environment (injected by the control plane):
 			if mErr != nil {
 				return mErr
 			}
+			// Absolute: the harness runs with cmd.Dir = the brief's workdir,
+			// which on a grounded session is the checkout, not serve's cwd —
+			// a relative --mcp-config would resolve inside the repo and the
+			// tool plane would silently vanish.
 			mcpConfigPath = setup.ConfigPath
+			if abs, aErr := filepath.Abs(mcpConfigPath); aErr == nil {
+				mcpConfigPath = abs
+			}
 			drv = &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
 		}
 		if serveDriver == "stub" && runKind == nodes.RunKindInteractive {
 			drv = &driver.Stub{Interactive: true}
 		}
-		branch := ""
-		if task != "" {
-			branch = "agent/" + task + "-" + slugify(typeName)
-		}
-
 		opts := agent.RunOptions{
 			SessionID:     sessionID,
 			Driver:        drv,
 			Brief:         brief,
+			Workdir:       workdir,
 			Branch:        branch,
 			Policy:        agent.NewToolPolicy(toolPolicy),
 			MCPConfigPath: mcpConfigPath,
