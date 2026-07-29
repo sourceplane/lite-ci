@@ -47,7 +47,7 @@ var (
 	integrationsTemplateVerbs = []string{"list", "create", "retire", "reactivate"}
 )
 
-const integrationsUsageLine = `orun integrations list
+const integrationsUsageLine = `orun integrations list [workspace]
   orun integrations <provider> status
   orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]
   orun integrations <provider> templates list
@@ -116,8 +116,21 @@ Examples:
 			// registry branch — with provider subtrees mounted, anything else
 			// reaching this RunE is an unknown provider, but `list` is ours.
 			if args[0] == "list" {
-				if len(args) > 1 {
-					return fmt.Errorf("unexpected argument %q after \"list\"\n\nusage:\n  %s", args[1], integrationsUsageLine)
+				// `list [workspace]`: the positional is the natural spelling
+				// when pointing at another workspace ("orun integrations list
+				// ws_…"). --workspace cannot serve — it is the rung-targeting
+				// boolean on the secret verbs — so the positional and --org
+				// are the two selectors; both given and differing is a
+				// contradiction, not a precedence puzzle.
+				if len(args) > 2 {
+					return fmt.Errorf("unexpected argument %q after \"list\"\n\nusage:\n  %s", args[2], integrationsUsageLine)
+				}
+				if len(args) == 2 {
+					ws := strings.TrimSpace(args[1])
+					if secretsOrgFlag != "" && secretsOrgFlag != ws {
+						return fmt.Errorf("both --org %q and positional workspace %q given — pass one", secretsOrgFlag, ws)
+					}
+					secretsOrgFlag = ws
 				}
 				return runIntegrationsList(cmd)
 			}
@@ -207,6 +220,19 @@ func newStatusExtensionCommand(provider string) *cobra.Command {
 // runIntegrationsList renders every connection the workspace can consume
 // (owned + inherited account-shared), with status — the CLI twin of the
 // console's Integrations page.
+
+// decorateConnectionsScopeErr turns a bare "Not found" from the connections
+// read into an actionable message: WHICH workspace was tried, why it may be
+// inaccessible (the repo link can point at a workspace the CURRENT session
+// has no access to — fresh login as a different user in an already-linked
+// repo, hit live), and how to target another one.
+func decorateConnectionsScopeErr(err error, org string) error {
+	if !strings.Contains(err.Error(), "not_found") {
+		return err
+	}
+	return fmt.Errorf("%w\n  workspace tried: %q (from --org / ORUN_WORKSPACE / intent / repo link, in that order)\n  that workspace does not exist or this session cannot access it — your orgs: `orun auth status`\n  target another workspace: `orun integrations list <ws-id|slug>` (or --org <ws-id|slug>)", err, org)
+}
+
 func runIntegrationsList(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	rt, err := newSecretsRuntime(ctx)
@@ -215,7 +241,7 @@ func runIntegrationsList(cmd *cobra.Command) error {
 	}
 	connections, err := rt.client.ListConnections(ctx, rt.org)
 	if err != nil {
-		return err
+		return decorateConnectionsScopeErr(err, rt.org)
 	}
 	if secretsJSONOut {
 		return emitJSON(connections)
@@ -264,7 +290,7 @@ func runIntegrationsStatus(cmd *cobra.Command, provider string) error {
 	}
 	connections, err := rt.client.ListConnections(ctx, rt.org)
 	if err != nil {
-		return err
+		return decorateConnectionsScopeErr(err, rt.org)
 	}
 	mine := make([]configsurface.Connection, 0, len(connections))
 	for _, c := range connections {
