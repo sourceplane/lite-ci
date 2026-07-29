@@ -4,6 +4,13 @@ title: Distributed execution with remote state
 
 Run `orun` jobs across parallel GitHub Actions matrix workers coordinated through [orun-backend](https://github.com/sourceplane/orun-backend).  The backend enforces DAG ordering — each matrix job polls until its dependencies complete, then claims work and executes.
 
+:::tip Terraform state needs no AWS either
+Remote runs also export a `TF_HTTP_*` environment pointing Terraform's
+`backend "http"` at the platform's native state store, so a matrix job needs
+no S3 bucket or OIDC role for Terraform state — see
+[Terraform state on the platform](../execute/terraform-state.md).
+:::
+
 ## Why local remote-state?
 
 Default `orun run` stores execution state on the local filesystem in the object model under `.orun/objectmodel/`. This works for a single machine but cannot coordinate between independent runners.

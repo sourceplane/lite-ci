@@ -106,7 +106,10 @@ That model enables:
 
 - **Resumable execution** — already-completed jobs are skipped (and carry their
   prior step logs forward)
-- **Job-level retry** — `--job <id> --retry` re-runs only that job
+- **Job-level retry** — `--job <id> --retry` re-runs only that job; on remote
+  state it also re-opens the job's failed claim and waits out failed upstream
+  dependencies, so a CI "rerun failed jobs" resumes cleanly — see
+  [Resume-aware CI reruns](../cli/orun-run.md#resume-aware-ci-reruns)
 - **Immutable logs** — `orun logs` reads the sealed log blobs
 - **Parallel-safe CI** — each run gets its own `exec-id`, content-addressed and
   collision-free

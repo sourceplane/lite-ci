@@ -98,6 +98,27 @@ Retry a failed job (clears its saved state first):
 orun run --job network-foundation@development.validate-terraform --retry
 ```
 
+### Resume-aware CI reruns
+
+With the exec-id pinned to the CI run id, a rerun resumes the same execution —
+and `--retry` makes the resume work end-to-end on remote state:
+
+- **The failed remote claim is re-opened.** A terminally-failed job would
+  normally refuse a new claim (`already failed on another runner`); with
+  `--retry` the claim carries the retry marker and the platform's sanctioned
+  `JOB_RETRIED` re-open admits it. First attempts are unaffected — `--retry`
+  on a non-terminal job claims normally.
+- **Failed dependencies are waited out, not fatal.** Where a plain run
+  fail-fasts on blocked/failed upstreams, a `--retry` run polls while the
+  upstream jobs' own retry lanes recover
+  (`○ dependencies of <job> failed in a prior attempt — waiting for their
+  retry lanes...`), bounded by the 30-minute dependency deadline.
+
+The practical recipe: give each CI job lane `--job <id> --retry`, and
+`gh run rerun --failed` on an orun-driven workflow just works — succeeded jobs
+stand, failed jobs re-open and re-run in dependency order. (Applies to the
+native coordination path; `ORUN_COORDINATION=legacy` keeps the old behavior.)
+
 Override the working directory for every job:
 
 ```bash
@@ -166,7 +187,7 @@ orun run --changed --explain
 | `--verbose` | Expand full step logs instead of the compact summary view |
 | `--workdir` | Override the working directory for all jobs |
 | `--job` | Run only one job ID (matches plan job ID or prefix) |
-| `--retry` | Clear existing state for `--job` before running |
+| `--retry` | Clear existing state for `--job` before running. On remote state, also re-opens the job's failed remote claim and waits out failed upstream dependencies — see [Resume-aware CI reruns](#resume-aware-ci-reruns) |
 | `--runner` | Execution backend: `local`, `docker`, or `github-actions` |
 | `--gha` | Shortcut for `--runner github-actions` |
 | `--exec-id` | Execution ID for resume or CI tracing (auto-generated if not set) |
@@ -333,7 +354,7 @@ Resolution order:
 
 1. **GitHub Actions OIDC** — when `GITHUB_ACTIONS=true` and the OIDC token endpoint vars are set, an OIDC token with audience `orun` is fetched automatically.
 2. **Local Orun CLI session** — outside GitHub Actions, run `orun auth login` once. The CLI resolves the repo namespace automatically from the current Git remote using the active session, then refreshes expired Orun access tokens automatically.
-3. **`ORUN_TOKEN`** — explicit fallback for short-lived Orun machine tokens in other CI or automation. Requires a pre-cached namespace link from `orun cloud link`.
+3. **`ORUN_TOKEN`** — explicit fallback for short-lived Orun machine tokens in other CI or automation. `orun cloud link` and `orun cloud check` honor it too, so a headless container can bootstrap its own namespace link with the same token.
 
 Normal local remote-state usage does not require a GitHub PAT.
 

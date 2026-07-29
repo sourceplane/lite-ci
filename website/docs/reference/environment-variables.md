@@ -10,13 +10,13 @@ title: Environment variables
 | --- | --- |
 | `ORUN_CONFIG_DIR` | Default value for the global `--config-dir` legacy fallback |
 | `ORUN_RUNNER` | Default runner for `orun run` |
-| `ORUN_TORKFLOW_ENGINE` | Path to the pinned torkflow engine binary used to execute [`workflow:`](../concepts/workflow-actions.md) plan steps and blueprint hooks, and `orun workflow run`/`view`. Only needed when a plan or scaffold actually uses a workflow |
+| `ORUN_GITHUB_API_URL` | Override the GitHub API base used to fetch [remote workflow refs](../cli/orun-workflow.md#remote-references) (GitHub Enterprise; default `https://api.github.com`) |
 | `ORUN_EXEC_ID` | Execution ID injected into `orun run`; useful in CI for stable cross-job traceability |
 | `ORUN_PLAN_ID` | Plan reference injected into `orun run`; overrides the default `latest` resolution |
 | `ORUN_NO_COLOR` | Disable ANSI color output (any non-empty value) |
 | `ORUN_REMOTE_STATE` | Set to `true` to enable remote state coordination via orun-backend |
 | `ORUN_BACKEND_URL` | URL of the orun-backend instance (required when `ORUN_REMOTE_STATE=true`) |
-| `ORUN_TOKEN` | Explicit short-lived Orun machine token fallback for CI or automation. Normal local remote-state usage should use `orun auth login`, not a GitHub PAT |
+| `ORUN_TOKEN` | Explicit short-lived Orun machine token fallback for CI or automation — honored by every auth path, including `orun cloud link`/`check`, so headless containers can self-link without a browser login. Normal local remote-state usage should use `orun auth login`, not a GitHub PAT |
 | `ORUN_WORKSPACE` | Workspace scope for remote state — a Workspace ID `ws_…`, slug, or `org_…`; overrides the linked workspace. Equivalent to `--workspace` |
 | `ORUN_ORG` | Retained alias of `ORUN_WORKSPACE` — org scope (slug or ID) for remote state; overrides the linked org and disambiguates auto-link when you belong to several. Equivalent to `--org` (the CLI reads either and prefers `ORUN_WORKSPACE`) |
 | `ORUN_PROJECT` | Project scope for remote state — overrides the linked project. Equivalent to `--project` |
@@ -73,6 +73,9 @@ No GitHub PAT is required for `orun backend` commands.
 | `ORUN_ENVIRONMENT` | Environment name for the current job (e.g. `dev`, `production`) |
 | `ORUN_COMPONENT` | Component name for the current job (e.g. `api-platform`) |
 | `ORUN_ENV` | Path to the env file for persisting environment variables across steps (alias for `GITHUB_ENV`) |
+| `ORUN_SECRET_OUTPUTS` | Path of the per-job sink file for [job output secrets](../concepts/secrets.md#secretoutputs--job-output-secrets) — exported only when the job declares `secretOutputs` |
+| `TF_HTTP_ADDRESS`, `TF_HTTP_LOCK_ADDRESS`, `TF_HTTP_UNLOCK_ADDRESS`, `TF_HTTP_LOCK_METHOD`, `TF_HTTP_UNLOCK_METHOD`, `TF_HTTP_USERNAME`, `TF_HTTP_PASSWORD`, `TF_HTTP_RETRY_MAX` | Terraform `http` state backend wiring, exported to component-job steps on remote runs — see [Terraform state on the platform](../execute/terraform-state.md) |
+| `ORUN_FLOW_SOURCE_REPO`, `ORUN_FLOW_SOURCE_REF`, `ORUN_FLOW_SOURCE_SHA`, `ORUN_FLOW_SOURCE_URL` | Provenance of a [remotely-fetched workflow](../cli/orun-workflow.md#remote-references), exported to every workflow `run:` step (empty for local files) |
 
 ## User-declared environment variables
 
