@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -42,12 +43,13 @@ var (
 // grammar (the provider positional is dynamic). Kept as data so the typo
 // suggester and the usage error speak from one list.
 var (
-	integrationsResources     = []string{"secret", "templates", "status"}
+	integrationsResources     = []string{"secret", "templates", "status", "connect"}
 	integrationsVerbs         = []string{"create"}
 	integrationsTemplateVerbs = []string{"list", "create", "retire", "reactivate"}
 )
 
 const integrationsUsageLine = `orun integrations list [workspace]
+  orun integrations <provider> connect [--org <ws>]   (token read from STDIN)
   orun integrations <provider> status
   orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]
   orun integrations <provider> templates list
@@ -145,6 +147,11 @@ Examples:
 				return fmt.Errorf("missing resource after provider %q\n\nusage:\n  %s", provider, integrationsUsageLine)
 			}
 			switch args[1] {
+			case "connect":
+				if len(args) > 2 {
+					return fmt.Errorf("unexpected argument %q after \"connect\"\n\nusage:\n  %s", args[2], integrationsUsageLine)
+				}
+				return runIntegrationsConnect(cmd, provider)
 			case "secret":
 				key, err := parseIntegrationsSecretArgs(args)
 				if err != nil {
@@ -786,4 +793,39 @@ func containsString(s []string, v string) bool {
 // for the caller's invocation. Pure — no I/O.
 func fromBrokerDeprecationNotice(spec replacementSpec) string {
 	return fmt.Sprintf("deprecated: --from-broker moves to the integration namespace; use '%s'", buildReplacementCommand(spec))
+}
+
+// runIntegrationsConnect performs a token-paste connect for the provider.
+// The credential is read from STDIN — never argv, never shell history, never
+// echoed — and sent exactly once to the platform's connect endpoint, which
+// verifies it against the provider before storing custody (IH5/IH6). Works
+// for any provider whose posture allows token connects (cloudflare; supabase
+// personal access tokens, sbp_…).
+func runIntegrationsConnect(cmd *cobra.Command, provider string) error {
+	ctx := cmd.Context()
+	rt, err := newSecretsRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	if termIsInteractive() {
+		fmt.Fprintf(os.Stderr, "Paste the %s token (input is not echoed differently — pipe it for scripts):\n", provider)
+	}
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 64*1024))
+	if err != nil {
+		return fmt.Errorf("read token from stdin: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return fmt.Errorf("no token on stdin — pipe it: `orun integrations %s connect --org <ws> < token.txt`", provider)
+	}
+	conn, err := rt.client.ConnectIntegration(ctx, rt.org, provider, token, "")
+	if err != nil {
+		return decorateConnectionsScopeErr(err, rt.org)
+	}
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	fmt.Printf("%s %s connected (%s, %s)\n", ui.Green(color, "✓"), provider, conn.ID, conn.Status)
+	if label := conn.AccountLabel(); label != "" {
+		fmt.Printf("  account: %s\n", label)
+	}
+	return nil
 }
