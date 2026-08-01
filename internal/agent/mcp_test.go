@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -33,8 +34,15 @@ func TestWriteMCPConfigFiltersThroughPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	orun, ok := cfg.MCPServers["orun"]
-	if !ok || orun.Command != "orun" || len(orun.Args) != 2 {
+	if !ok || orun.Command == "" || len(orun.Args) != 2 {
 		t.Fatalf("orun MCP server entry = %+v", orun)
+	}
+	// PATH-proof: the command must be THIS process's absolute executable (the
+	// harness spawns MCP servers with an inherited PATH that may not carry
+	// ~/.local/bin in a cloud sandbox), falling back to "orun" only when the
+	// executable cannot be resolved at all.
+	if orun.Command != "orun" && !filepath.IsAbs(orun.Command) {
+		t.Fatalf("orun MCP server command must be absolute (or the bare fallback), got %q", orun.Command)
 	}
 
 	wantAllow := []string{"mcp__orun__work_get", "mcp__orun__work_query"}
