@@ -95,6 +95,7 @@ func TestIntegrationsDispatcherGrammar(t *testing.T) {
 		{"unknown resource suggests templates", []string{"integrations", "cloudflare", "template", "list"}, "did you mean:"},
 		{"list takes one workspace at most", []string{"integrations", "list", "ws_x", "extra"}, `unexpected argument "extra"`},
 		{"list rejects conflicting selectors", []string{"integrations", "list", "ws_x", "--org", "ws_y"}, "pass one"},
+		{"connect takes no extra args", []string{"integrations", "cloudflare", "connect", "extra"}, `unexpected argument "extra"`},
 		{"status takes no args", []string{"integrations", "cloudflare", "status", "extra"}, `unexpected argument "extra"`},
 		{"templates missing verb", []string{"integrations", "cloudflare", "templates"}, "missing verb"},
 		{"templates unknown verb", []string{"integrations", "cloudflare", "templates", "creat", "x"}, "did you mean:"},

@@ -82,7 +82,25 @@ GitHub PAT or OAuth token is required.`,
 		},
 	}
 
-	cloudCmd.AddCommand(linkCmd, unlinkCmd, statusCmd, openCmd)
+	workspaceCmd := &cobra.Command{
+		Use:   "workspace",
+		Short: "Manage Orun Cloud workspaces",
+	}
+	var wsCreateSlug string
+	wsCreateCmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a new workspace (org) owned by the current session",
+		Long: `Create a new Orun Cloud workspace. Prints its ws_… id and slug — the id is
+what the bootstrap flows take as --set workspace=…. Authenticates from the
+CLI session or ORUN_TOKEN (headless).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudWorkspaceCreate(cmd.Context(), args[0], wsCreateSlug)
+		},
+	}
+	wsCreateCmd.Flags().StringVar(&wsCreateSlug, "slug", "", "Workspace slug (default: derived from the name by the server)")
+	workspaceCmd.AddCommand(wsCreateCmd)
+	cloudCmd.AddCommand(linkCmd, unlinkCmd, statusCmd, openCmd, workspaceCmd)
 	registerCloudCheck(cloudCmd)
 }
 
@@ -587,4 +605,29 @@ func linkProjectLabel(link *cliauth.RepoLink) string {
 		return s
 	}
 	return link.ProjectID
+}
+
+// runCloudWorkspaceCreate creates a workspace (org) and prints its identity.
+// The endpoint and client method are the ones the personal-org materializer
+// already uses (UO2) — this is the explicit, named-workspace spelling.
+func runCloudWorkspaceCreate(ctx context.Context, name, slug string) error {
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
+	if err != nil {
+		return err
+	}
+	token, err := cloudSessionToken(ctx, backendURL)
+	if err != nil {
+		return err
+	}
+	client := cliauth.NewBackendClient(backendURL, version)
+	org, err := client.CreateOrg(ctx, token, name, slug)
+	if err != nil {
+		return fmt.Errorf("create workspace: %w", err)
+	}
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	fmt.Printf("%s workspace created\n", ui.Green(color, "✓"))
+	fmt.Printf("  id:   %s\n", org.ID)
+	fmt.Printf("  slug: %s\n", org.Slug)
+	fmt.Printf("  next: connect integrations (`orun integrations <provider> connect --org %s`)\n", org.ID)
+	return nil
 }

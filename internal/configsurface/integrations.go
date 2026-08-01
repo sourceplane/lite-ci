@@ -114,3 +114,30 @@ func (c *Client) UpdateScopeTemplate(ctx context.Context, org, provider, templat
 	}
 	return &payload.Template, nil
 }
+
+// ConnectIntegration performs a token-paste connect (IH5/IH6): POSTs the
+// pasted parent credential to the org's provider connect endpoint. The token
+// is write-only from the caller's perspective — sent once, never echoed. The
+// returned connection is already ACTIVE for token-kind connects (the server
+// verifies the paste synchronously before storing custody).
+func (c *Client) ConnectIntegration(ctx context.Context, org, provider, parentToken, displayName string) (*Connection, error) {
+	if strings.TrimSpace(org) == "" {
+		return nil, fmt.Errorf("configsurface: connect needs an organization")
+	}
+	if strings.TrimSpace(parentToken) == "" {
+		return nil, fmt.Errorf("configsurface: connect needs a non-empty token")
+	}
+	path := "/v1/organizations/" + urlSegment(org) + "/integrations/" + urlSegment(provider) + "/connect"
+	body := map[string]string{"parentToken": parentToken}
+	if s := strings.TrimSpace(displayName); s != "" {
+		body["displayName"] = s
+	}
+	var payload struct {
+		Connection Connection `json:"connection"`
+	}
+	// Not retryable: a slow-but-successful connect must not be replayed.
+	if err := c.doJSON(ctx, http.MethodPost, path, body, &payload, false); err != nil {
+		return nil, fmt.Errorf("connect %s: %w", provider, err)
+	}
+	return &payload.Connection, nil
+}
