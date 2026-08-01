@@ -47,13 +47,26 @@ func orunMCPToolName(tool string) string { return "mcp__orun__" + tool }
 // through unchanged.
 func policyToolName(tool string) string { return strings.TrimPrefix(tool, "mcp__orun__") }
 
+// orunCommand names the binary the harness spawns for the orun MCP server.
+// Absolute — this process's own executable — never a bare "orun": the harness
+// launches MCP servers with whatever PATH it inherited, and in a cloud sandbox
+// (orun installed to ~/.local/bin by the bootstrap) a bare name silently fails
+// to spawn and the whole workspace tool plane vanishes. Same rule as the git
+// credential helper in serve.
+func orunCommand() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	return "orun"
+}
+
 // WriteMCPConfig writes the driver MCP config into dir and derives the
 // harness tool gates from policy over the orun MCP tool surface (toolNames —
 // workmcp.ToolNames() in production; injected for tests). extra servers
 // (the platform MCP, cloud-attached) are merged under their given names.
 func WriteMCPConfig(dir string, policy ToolPolicy, toolNames []string, extra map[string]MCPServer) (MCPSetup, error) {
 	servers := map[string]MCPServer{
-		"orun": {Command: "orun", Args: []string{"mcp", "serve"}},
+		"orun": {Command: orunCommand(), Args: []string{"mcp", "serve"}},
 	}
 	for name, srv := range extra {
 		servers[name] = srv
