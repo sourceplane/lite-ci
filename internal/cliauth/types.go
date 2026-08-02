@@ -7,9 +7,13 @@ import "time"
 // orgs[].id serves what the CLI previously called allowedNamespaceIds.
 type OrgRef struct {
 	ID   string `json:"id" yaml:"id"`
-	Slug string `json:"slug,omitempty" yaml:"slug,omitempty"`
-	Name string `json:"name,omitempty" yaml:"name,omitempty"`
-	Role string `json:"role,omitempty" yaml:"role,omitempty"`
+	// WorkspaceRef is the led-with public Workspace ID (`ws_…`, WID2) — the
+	// PRIMARY identifier users see and pass around; ID is the internal
+	// org_… public id kept for API paths and back-compat.
+	WorkspaceRef string `json:"workspaceRef,omitempty" yaml:"workspaceRef,omitempty"`
+	Slug         string `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Name         string `json:"name,omitempty" yaml:"name,omitempty"`
+	Role         string `json:"role,omitempty" yaml:"role,omitempty"`
 }
 
 // Credentials are the locally stored Orun CLI session secrets.

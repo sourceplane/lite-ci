@@ -624,10 +624,18 @@ func runCloudWorkspaceCreate(ctx context.Context, name, slug string) error {
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
 	}
+	// The ws_… Workspace ID is the PRIMARY interface everywhere a workspace
+	// is named (flows, secret refs, console URLs); the org_… public id is an
+	// internal detail shown only as a fallback for backends that predate
+	// workspaceRef in the create response.
+	primary := strings.TrimSpace(org.WorkspaceRef)
+	if primary == "" {
+		primary = org.ID
+	}
 	color := ui.ColorEnabledForWriter(os.Stdout)
 	fmt.Printf("%s workspace created\n", ui.Green(color, "✓"))
-	fmt.Printf("  id:   %s\n", org.ID)
+	fmt.Printf("  id:   %s\n", primary)
 	fmt.Printf("  slug: %s\n", org.Slug)
-	fmt.Printf("  next: connect integrations (`orun integrations <provider> connect --org %s`)\n", org.ID)
+	fmt.Printf("  next: connect integrations (`orun integrations <provider> connect --org %s`)\n", primary)
 	return nil
 }

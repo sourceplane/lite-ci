@@ -529,9 +529,10 @@ func (c *BackendClient) CreateOrg(ctx context.Context, accessToken, name, slug s
 	}
 	var wrapped struct {
 		Organization struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
+			ID           string `json:"id"`
+			WorkspaceRef string `json:"workspaceRef"`
+			Name         string `json:"name"`
+			Slug         string `json:"slug"`
 		} `json:"organization"`
 	}
 	if err := c.doJSONData(ctx, http.MethodPost, "/v1/organizations",
@@ -542,10 +543,11 @@ func (c *BackendClient) CreateOrg(ctx context.Context, accessToken, name, slug s
 		return nil, &APIError{Code: "INVALID_RESPONSE", Message: "org create returned no organization"}
 	}
 	return &OrgRef{
-		ID:   wrapped.Organization.ID,
-		Slug: wrapped.Organization.Slug,
-		Name: wrapped.Organization.Name,
-		Role: "owner",
+		ID:           wrapped.Organization.ID,
+		WorkspaceRef: wrapped.Organization.WorkspaceRef,
+		Slug:         wrapped.Organization.Slug,
+		Name:         wrapped.Organization.Name,
+		Role:         "owner",
 	}, nil
 }
 
