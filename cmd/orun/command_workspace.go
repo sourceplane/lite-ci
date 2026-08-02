@@ -7,6 +7,7 @@ package main
 // (resolveScope owns that order; this file only reads and reports it).
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -36,8 +37,13 @@ A workspace is resolved most-specific-first:
 The selection is LAST on purpose: it fills in for bare commands without ever
 retargeting a repo that declares or links its own workspace. "orun workspace"
 always names the rung that actually won.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error { return runWorkspaceShow() },
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return runWorkspaceShowRemote(cmd.Context(), args[0])
+			}
+			return runWorkspaceShow()
+		},
 	}
 
 	listCmd := &cobra.Command{
@@ -259,4 +265,35 @@ func workspaceDisplay(id string, slug ...string) string {
 		return id
 	}
 	return fmt.Sprintf("%s (%s)", s, id)
+}
+
+// runWorkspaceShowRemote resolves a NAMED workspace against the backend and
+// prints its identity. Unlike the bare form (local resolution state), this
+// works for any credential that can read the workspace — including
+// workspace-scoped API tokens (ORUN_TOKEN), which see no memberships list.
+// The "slug:" line is a stable, machine-parsable contract (flows read it).
+func runWorkspaceShowRemote(ctx context.Context, target string) error {
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL)
+	if err != nil {
+		return err
+	}
+	token, err := cloudSessionToken(ctx, backendURL)
+	if err != nil {
+		return err
+	}
+	client := cliauth.NewBackendClient(backendURL, version)
+	org, err := client.GetOrg(ctx, token, target)
+	if err != nil {
+		return fmt.Errorf("workspace %q: %w", target, err)
+	}
+	primary := strings.TrimSpace(org.WorkspaceRef)
+	if primary == "" {
+		primary = org.ID
+	}
+	color := ui.ColorEnabledForWriter(os.Stdout)
+	fmt.Printf("%s %s\n", ui.Green(color, "workspace:"), primary)
+	fmt.Printf("  slug: %s\n", org.Slug)
+	fmt.Printf("  name: %s\n", org.Name)
+	fmt.Printf("  id:   %s\n", org.ID)
+	return nil
 }

@@ -384,6 +384,21 @@ func candidateOrgs(resolved *cliauth.ResolveLinksResponse) []orgChoice {
 func sessionOrgs() []orgChoice {
 	creds, err := cliauth.LoadSession()
 	if err != nil || creds == nil {
+		// Headless (ORUN_TOKEN): no stored session — list from the backend so
+		// `workspace list/use/show` (and everything that resolves slugs from
+		// them) work in containers too.
+		if token := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); token != "" {
+			if backendURL, bErr := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL); bErr == nil {
+				client := cliauth.NewBackendClient(backendURL, version)
+				if orgs, lErr := client.ListMyOrgs(context.Background(), token); lErr == nil {
+					out := make([]orgChoice, 0, len(orgs))
+					for _, o := range orgs {
+						out = append(out, orgChoice{ID: o.ID, Slug: o.Slug, Label: orgChoiceLabel(o.Slug, o.ID), WorkspaceRef: o.WorkspaceRef})
+					}
+					return out
+				}
+			}
+		}
 		return nil
 	}
 	out := make([]orgChoice, 0, len(creds.Orgs))
