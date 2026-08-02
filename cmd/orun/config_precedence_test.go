@@ -70,7 +70,9 @@ func TestResolveBackendURL_DeprecatedBackendAliasHonored(t *testing.T) {
 }
 
 func TestResolveScopePrecedence(t *testing.T) {
-	// flag > env > intent > link (specs/oidc-ci-tenancy §4.1).
+	// flag > env > intent > link > `orun workspace use` (specs/oidc-ci-tenancy
+	// §4.1). HOME is isolated because the selection rung reads ~/.orun/config.yaml.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv(orgEnvVar, "env-org")
 	t.Setenv(projectEnvVar, "env-project")
 
@@ -137,6 +139,7 @@ func TestIntentScopeAndStrictMode(t *testing.T) {
 // Workspace spelling leads, the legacy org spelling is still honored, and when
 // both are present Workspace wins — for the env layer and the intent layer.
 func TestWorkspaceAliasResolution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	// ORUN_WORKSPACE is honored at the env layer.
 	t.Setenv(workspaceEnvVar, "ws-env")
 	t.Setenv(orgEnvVar, "")

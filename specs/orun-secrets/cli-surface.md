@@ -10,20 +10,22 @@
 ## 1. `orun secrets` — manage values (write-only + metadata)
 
 ```
-orun secrets set      <KEY> [--env <env> | --project | --workspace] [--account]
+orun secrets set      <KEY> [--env <env> | --project | --shared] [--account]
                             [--personal] [--value-stdin | --value <v>]
                             [--rotation <policy>] [--locked] [--json]
 orun secrets import   --from-dotenv <file> --env <env> [--write-refs] [--json]      # bulk onboarding, write-only
-orun secrets list     [--env <env> | --project | --workspace] [--chain] [--json]    # metadata only — never values
-orun secrets rotate   <KEY> [--env <env> | --project | --workspace] [--value-stdin] [--json]  # append version; raises onRotate (SD-13)
-orun secrets revoke   <KEY> [--env <env> | --project | --workspace] [--json]        # tombstone; alias: rm
-orun secrets reveal   <KEY> [--env <env> | --project | --workspace] --break-glass --reason <s>   # SINGLE audited human reveal (SD-3)
-orun secrets versions <KEY> [--env <env> | --project | --workspace] [--json]        # version history (metadata)
+orun secrets list     [--env <env> | --project | --shared] [--chain] [--json]    # metadata only — never values
+orun secrets rotate   <KEY> [--env <env> | --project | --shared] [--value-stdin] [--json]  # append version; raises onRotate (SD-13)
+orun secrets revoke   <KEY> [--env <env> | --project | --shared] [--json]        # tombstone; alias: rm
+orun secrets reveal   <KEY> [--env <env> | --project | --shared] --break-glass --reason <s>   # SINGLE audited human reveal (SD-3)
+orun secrets versions <KEY> [--env <env> | --project | --shared] [--json]        # version history (metadata)
 orun secrets syncs    [--env <env>] [--entity <ref>]                                # materialization state (SD-13)
 ```
 
 Every subcommand takes the same rung selectors (`--env <slug>` / `--project` /
-`--workspace`) and `--json`. `rotate`, `revoke`, `versions`, and `reveal`
+`--shared`) and `--json`. WHICH workspace they resolve against is `--workspace`
+(or `orun workspace use <ws>` once) — the rung and the tenancy are different
+questions and no longer share a flag name. `rotate`, `revoke`, `versions`, and `reveal`
 previously accepted `--env` only, which made a workspace- or project-scoped
 secret impossible to rotate, inspect, or break-glass from the CLI; they now
 resolve scope through the shared selector, so any rung a secret can live at is
@@ -32,7 +34,7 @@ routed to it, on any subcommand.
 
 - **Scope flags (v3, replaces v2's `--namespace`).** Default scope is the
   linked **project** at the given `--env` (environment scope). `--project <p>`
-  targets another project you hold `secret.write` on; `--workspace` writes a
+  targets another project you hold `secret.write` on; `--shared` writes a
   workspace-shared row; `--account` writes an account-wide row. `--locked`
   (account/workspace scope only) sets `overridable: false` — lower rungs can
   no longer shadow the key (SD-12′). There is no `_shared/<group>` flag; the

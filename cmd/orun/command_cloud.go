@@ -335,6 +335,34 @@ type orgChoice struct {
 	ID    string
 	Slug  string
 	Label string
+	// WorkspaceRef is the ws_… Workspace ID when the session carries it — the
+	// primary identifier users see and pass (WID2).
+	WorkspaceRef string
+	Role         string
+}
+
+// primaryID is the identifier to persist and print: the ws_… Workspace ID when
+// the backend supplied one, else the org_… public id.
+func (o orgChoice) primaryID() string {
+	if ref := strings.TrimSpace(o.WorkspaceRef); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(o.ID)
+}
+
+// matches reports whether a user-typed (or resolved) workspace names this org —
+// by slug, ws_… id, or org_… id, case-insensitively.
+func (o orgChoice) matches(target string) bool {
+	t := strings.TrimSpace(target)
+	if t == "" {
+		return false
+	}
+	for _, candidate := range []string{o.Slug, o.WorkspaceRef, o.ID} {
+		if c := strings.TrimSpace(candidate); c != "" && strings.EqualFold(c, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidateOrgs returns the unique orgs from the resolve candidates.
@@ -360,10 +388,16 @@ func sessionOrgs() []orgChoice {
 	}
 	out := make([]orgChoice, 0, len(creds.Orgs))
 	for _, o := range creds.Orgs {
-		if strings.TrimSpace(o.ID) == "" {
+		if strings.TrimSpace(o.ID) == "" && strings.TrimSpace(o.WorkspaceRef) == "" {
 			continue
 		}
-		out = append(out, orgChoice{ID: o.ID, Slug: o.Slug, Label: orgChoiceLabel(o.Slug, o.ID)})
+		out = append(out, orgChoice{
+			ID:           o.ID,
+			Slug:         o.Slug,
+			Label:        orgChoiceLabel(o.Slug, o.ID),
+			WorkspaceRef: o.WorkspaceRef,
+			Role:         o.Role,
+		})
 	}
 	return out
 }

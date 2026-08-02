@@ -63,11 +63,20 @@ func warnBackendURLDeprecated() {
 	fmt.Fprintln(os.Stderr, "warning: ~/.orun/config.yaml `backend.url` is deprecated; rename it to `cloud.url`")
 }
 
+// workspaceResolutionOrder is the one sentence every "which workspace?" message
+// quotes, so the chain is described identically wherever it surfaces.
+const workspaceResolutionOrder = "--workspace, ORUN_WORKSPACE/ORUN_ORG, intent.yaml, this repo's link, then `orun workspace use`"
+
 // resolveScope resolves the org/project scope for a remote-state call with the
-// precedence in specs/oidc-ci-tenancy §4.1: --org/--project flags >
-// ORUN_ORG/ORUN_PROJECT env > intent execution.state.org/project > the cached
-// RepoLink's org/project. Empty fields are filled from the next source; the
-// remotestate client defaults any still-empty field to the OSS _local scope.
+// precedence in specs/oidc-ci-tenancy §4.1: --workspace/--project flags >
+// ORUN_WORKSPACE/ORUN_PROJECT env > intent execution.state.org/project > the
+// cached RepoLink's org/project > the working workspace selected with `orun
+// workspace use`. Empty fields are filled from the next source; the remotestate
+// client defaults any still-empty field to the OSS _local scope.
+//
+// The selection sits LAST on purpose: it is a default for when nothing else
+// applies, so choosing a working workspace can never silently retarget a repo
+// that declares or links its own tenancy.
 func resolveScope(flagOrg, flagProject, intentOrg, intentProject, linkOrg, linkProject string) remotestate.Scope {
 	scope := remotestate.Scope{
 		OrgID:     strings.TrimSpace(flagOrg),
@@ -93,7 +102,32 @@ func resolveScope(flagOrg, flagProject, intentOrg, intentProject, linkOrg, linkP
 	if scope.ProjectID == "" {
 		scope.ProjectID = strings.TrimSpace(linkProject)
 	}
+	if scope.OrgID == "" {
+		scope.OrgID = strings.TrimSpace(cliauth.SelectedWorkspace().ID)
+	}
 	return scope
+}
+
+// workspaceSource names the rung that WOULD win for a bare command in this
+// directory — what `orun workspace` reports and what the "no workspace" error
+// says nothing set. Mirrors resolveScope exactly; keep the two in step.
+func workspaceSource(flagOrg, intentOrg, linkOrg string) (ws, source string) {
+	if v := strings.TrimSpace(flagOrg); v != "" {
+		return v, "--workspace"
+	}
+	if v := preferWorkspace(os.Getenv(workspaceEnvVar), os.Getenv(orgEnvVar)); v != "" {
+		return v, "ORUN_WORKSPACE/ORUN_ORG"
+	}
+	if v := strings.TrimSpace(intentOrg); v != "" {
+		return v, "intent.yaml execution.state.workspace"
+	}
+	if v := strings.TrimSpace(linkOrg); v != "" {
+		return v, "this repo's Orun Cloud link"
+	}
+	if sel := cliauth.SelectedWorkspace(); strings.TrimSpace(sel.ID) != "" {
+		return sel.ID, "`orun workspace use`"
+	}
+	return "", ""
 }
 
 // intentScope extracts the declared org/project and the strict-mode flag from a

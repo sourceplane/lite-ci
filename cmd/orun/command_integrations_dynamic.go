@@ -109,9 +109,10 @@ func argvTouchesIntegrations(argv []string) bool {
 
 // dynamicIntegrationsScope resolves, without network and without failing, the
 // workspace whose cache should render and the .orun directory it lives under.
-// Precedence mirrors resolveScope (--org argv > ORUN_WORKSPACE/ORUN_ORG >
-// intent execution.state > cached RepoLink) — flags are not parsed yet at
-// command construction, so --org is read from argv directly.
+// Precedence mirrors resolveScope (--workspace/--org argv > ORUN_WORKSPACE/
+// ORUN_ORG > intent execution.state > cached RepoLink > the workspace selected
+// with `orun workspace use`) — flags are not parsed yet at command
+// construction, so the selector is read from argv directly.
 func dynamicIntegrationsScope(argv []string) (org, orunDir string) {
 	root := "."
 	var intent *model.Intent
@@ -124,6 +125,9 @@ func dynamicIntegrationsScope(argv []string) (org, orunDir string) {
 		}
 	}
 	orunDir = filepath.Join(root, ".orun")
+	if v := argvFlagValue(argv, "--workspace"); v != "" {
+		return v, orunDir
+	}
 	if v := argvFlagValue(argv, "--org"); v != "" {
 		return v, orunDir
 	}
@@ -138,12 +142,14 @@ func dynamicIntegrationsScope(argv []string) (org, orunDir string) {
 		if remote, err := currentGitRemoteURL(root); err == nil {
 			if fullName := parseGitHubRepoFullName(remote); fullName != "" {
 				if link, lerr := cliauth.FindRepoLink(backendURL, remote, fullName); lerr == nil && link != nil {
-					return strings.TrimSpace(link.OrgID), orunDir
+					if org := strings.TrimSpace(link.OrgID); org != "" {
+						return org, orunDir
+					}
 				}
 			}
 		}
 	}
-	return "", orunDir
+	return strings.TrimSpace(cliauth.SelectedWorkspace().ID), orunDir
 }
 
 // argvFlagValue scans raw argv for `--name value` / `--name=value`.

@@ -227,8 +227,9 @@ func describeSessionAuth(creds *cliauth.Credentials, now time.Time) (bool, strin
 
 // doctorWorkspace resolves the workspace exactly like `mcp serve`
 // (--workspace > ORUN_WORKSPACE/ORUN_ORG > intent.yaml execution.state >
-// the cached repo link) and names the rung that supplied it. No workspace
-// is a warning, not a failure: serve still mounts the platform plane.
+// the cached repo link > `orun workspace use`) and names the rung that
+// supplied it. No workspace is a warning, not a failure: serve still mounts
+// the platform plane.
 func doctorWorkspace(backendURL, flagWS string) (string, doctorCheck) {
 	intentOrg, _, _ := intentScope(loadIntentForCloudConfig())
 	linkOrg := ""
@@ -239,7 +240,7 @@ func doctorWorkspace(backendURL, flagWS string) (string, doctorCheck) {
 	ws, source := resolveDoctorWorkspace(flagWS, envWS, intentOrg, linkOrg)
 	if ws == "" {
 		return "", doctorCheck{name: "workspace", ok: true, warn: true,
-			line: "none resolved (checked --workspace, ORUN_WORKSPACE/ORUN_ORG, intent.yaml execution.state, the repo link) — serve mounts platform tools only; pass --workspace or run `orun cloud link` to mount work tools"}
+			line: "none resolved (checked " + workspaceResolutionOrder + ") — serve mounts platform tools only; select one with `orun workspace use <ws>` (or pass --workspace) to mount work tools"}
 	}
 	return ws, doctorCheck{name: "workspace", ok: true, line: fmt.Sprintf("%s (from %s)", ws, source)}
 }
@@ -252,6 +253,7 @@ func resolveDoctorWorkspace(flagWS, envWS, intentWS, linkWS string) (value, sour
 		{envWS, "ORUN_WORKSPACE/ORUN_ORG"},
 		{intentWS, "intent.yaml execution.state"},
 		{linkWS, "the cached repo link"},
+		{cliauth.SelectedWorkspace().ID, "`orun workspace use`"},
 	} {
 		if v := strings.TrimSpace(cand.v); v != "" {
 			return v, cand.src

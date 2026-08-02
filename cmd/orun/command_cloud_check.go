@@ -72,7 +72,7 @@ func runCloudCheck() error {
 	}
 	org := resolveCheckOrg(cloudCheckOrg, intentOrg, linkOrgID)
 	if org == "" {
-		return fmt.Errorf("no workspace to check against; pass --workspace, set ORUN_WORKSPACE, or declare `execution.state.workspace` in intent.yaml")
+		return fmt.Errorf("no workspace to check against; select one with `orun workspace use <ws>`, pass --workspace, set ORUN_WORKSPACE, or declare `execution.state.workspace` in intent.yaml")
 	}
 
 	ctx := context.Background()
@@ -108,8 +108,9 @@ func runCloudCheck() error {
 }
 
 // resolveCheckOrg resolves the org to check with the flag > env > intent >
-// cached-link precedence, mapping a slug to an org id via the cached session
-// when possible (the listing path prefers the org_… id).
+// cached-link > selected-workspace precedence (resolveScope's chain), mapping a
+// slug to an org id via the cached session when possible (the listing path
+// prefers the org_… id).
 func resolveCheckOrg(flagOrg, intentOrg, linkOrgID string) string {
 	cand := strings.TrimSpace(flagOrg)
 	if cand == "" {
@@ -121,6 +122,9 @@ func resolveCheckOrg(flagOrg, intentOrg, linkOrgID string) string {
 	}
 	if cand == "" {
 		cand = strings.TrimSpace(linkOrgID)
+	}
+	if cand == "" {
+		cand = strings.TrimSpace(cliauth.SelectedWorkspace().ID)
 	}
 	if cand != "" && !strings.HasPrefix(cand, "org_") {
 		if id := sessionOrgIDForSlug(cand); id != "" {

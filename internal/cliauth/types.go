@@ -1,12 +1,15 @@
 package cliauth
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // OrgRef identifies an organization the actor belongs to, with their role. It
 // is the org/project-spine replacement for the retiring "namespace" model:
 // orgs[].id serves what the CLI previously called allowedNamespaceIds.
 type OrgRef struct {
-	ID   string `json:"id" yaml:"id"`
+	ID string `json:"id" yaml:"id"`
 	// WorkspaceRef is the led-with public Workspace ID (`ws_…`, WID2) — the
 	// PRIMARY identifier users see and pass around; ID is the internal
 	// org_… public id kept for API paths and back-compat.
@@ -110,14 +113,38 @@ type BackendBootstrap struct {
 	InitAt           string `yaml:"initAt,omitempty"`
 }
 
+// WorkspaceSelection is the working workspace chosen with `orun workspace use`
+// — the machine-wide default for every command that needs a tenancy and was
+// given none. It is a DEFAULT, not an override: anything more specific (the
+// --workspace flag, ORUN_WORKSPACE, a repo's intent.yaml, a repo link) still
+// wins, so selecting a workspace can never silently retarget a linked repo.
+type WorkspaceSelection struct {
+	// ID is what commands resolve to: the ws_… Workspace ID when the session
+	// knows it (WID2), else the org_… public id.
+	ID   string `yaml:"id,omitempty"`
+	Slug string `yaml:"slug,omitempty"`
+	// SetAt is when it was selected (RFC3339), shown by `orun workspace`.
+	SetAt string `yaml:"setAt,omitempty"`
+}
+
 // Config is the non-secret CLI config stored in ~/.orun/config.yaml.
 type Config struct {
 	// Cloud is the preferred backend/catalog config block (design §8).
 	Cloud CloudConfig `yaml:"cloud,omitempty"`
 	// Backend is the deprecated alias for cloud.url (one release, design §8).
-	Backend          BackendConfig     `yaml:"backend,omitempty"`
-	BackendBootstrap *BackendBootstrap `yaml:"backendBootstrap,omitempty"`
-	Repos            []RepoLink        `yaml:"repos,omitempty"`
+	Backend          BackendConfig      `yaml:"backend,omitempty"`
+	BackendBootstrap *BackendBootstrap  `yaml:"backendBootstrap,omitempty"`
+	Workspace        WorkspaceSelection `yaml:"workspace,omitempty"`
+	Repos            []RepoLink         `yaml:"repos,omitempty"`
+}
+
+// Label renders the selection for humans: the slug when known (that is what
+// people say out loud), else the id.
+func (w WorkspaceSelection) Label() string {
+	if s := strings.TrimSpace(w.Slug); s != "" {
+		return s
+	}
+	return strings.TrimSpace(w.ID)
 }
 
 // AccessExpiryTime parses the stored access-token expiry.

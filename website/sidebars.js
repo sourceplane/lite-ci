@@ -106,6 +106,7 @@ const sidebars = {
         'cli/orun-backend',
         'cli/orun-auth',
         'cli/orun-cloud',
+        'cli/orun-workspace',
         'cli/orun-secrets',
         'cli/orun-integrations',
         'cli/orun-policy',
