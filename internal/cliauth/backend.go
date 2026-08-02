@@ -1100,3 +1100,47 @@ func jwtExpiry(token string) string {
 	}
 	return time.Unix(payload.Exp, 0).UTC().Format(time.RFC3339)
 }
+
+// ListMyOrgs calls GET /v1/organizations and returns the orgs this token can
+// see. Headless sessions (ORUN_TOKEN) have no stored creds.Orgs — this is
+// their source for workspace listing/selection.
+func (c *BackendClient) ListMyOrgs(ctx context.Context, accessToken string) ([]OrgRef, error) {
+	var wrapped struct {
+		Organizations []struct {
+			ID           string `json:"id"`
+			WorkspaceRef string `json:"workspaceRef"`
+			Name         string `json:"name"`
+			Slug         string `json:"slug"`
+		} `json:"organizations"`
+	}
+	if err := c.doJSONData(ctx, http.MethodGet, "/v1/organizations",
+		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &wrapped); err != nil {
+		return nil, err
+	}
+	out := make([]OrgRef, 0, len(wrapped.Organizations))
+	for _, o := range wrapped.Organizations {
+		out = append(out, OrgRef{ID: o.ID, WorkspaceRef: o.WorkspaceRef, Name: o.Name, Slug: o.Slug})
+	}
+	return out, nil
+}
+
+// GetOrg calls GET /v1/organizations/{idOrSlug} and returns the org. Works
+// with user sessions AND workspace-scoped API tokens (which see no
+// memberships list but can read their own workspace) — the universal
+// workspace→slug resolver.
+func (c *BackendClient) GetOrg(ctx context.Context, accessToken, idOrSlug string) (*OrgRef, error) {
+	var wrapped struct {
+		Organization struct {
+			ID           string `json:"id"`
+			WorkspaceRef string `json:"workspaceRef"`
+			Name         string `json:"name"`
+			Slug         string `json:"slug"`
+		} `json:"organization"`
+	}
+	if err := c.doJSONData(ctx, http.MethodGet, "/v1/organizations/"+url.PathEscape(strings.TrimSpace(idOrSlug)),
+		map[string]string{"Authorization": "Bearer " + accessToken}, nil, &wrapped); err != nil {
+		return nil, err
+	}
+	o := wrapped.Organization
+	return &OrgRef{ID: o.ID, WorkspaceRef: o.WorkspaceRef, Name: o.Name, Slug: o.Slug}, nil
+}
