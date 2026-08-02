@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sourceplane/orun/internal/catalogmodel"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/sourcectx"
 )
 
 // TestAutopushEnabled covers the OR of the two sources. The user-config branch
@@ -29,25 +29,30 @@ func TestAutopushEnabled(t *testing.T) {
 	}
 }
 
-// TestCatalogAutoPublishScope pins the gate: only the clean default branch is
-// eligible for auto-publish, so a feature branch / dirty tree / detached state
+// TestCatalogAutoPublishScope pins the gate: the clean default branch is
+// eligible for auto-publish — including when its head is ALSO tagged (a
+// release workflow that tags every main head must not silently disable
+// auto-sync; hit live). A feature branch / dirty tree / PR / detached tag
 // never moves the project-wide head.
 func TestCatalogAutoPublishScope(t *testing.T) {
-	if !catalogAutoPublishScope(catalogmodel.SourceScopeBranchMain) {
+	mainClean := sourcectx.WorkspaceState{Branch: "main", HeadRevision: "abc"}
+	if !catalogAutoPublishScope(mainClean) {
 		t.Fatal("branch-main must be auto-publishable")
 	}
-	for _, scope := range []string{
-		catalogmodel.SourceScopeBranchFeature,
-		catalogmodel.SourceScopeBranchProtected, // conservative: only main for now
-		catalogmodel.SourceScopeLocalDirty,
-		catalogmodel.SourceScopeLocalNoGit,
-		catalogmodel.SourceScopePR,
-		catalogmodel.SourceScopeTag,
-		catalogmodel.SourceScopeCIEvent,
-		"",
+	taggedMain := sourcectx.WorkspaceState{Branch: "main", HeadRevision: "abc", Tag: "v1.2.3"}
+	if !catalogAutoPublishScope(taggedMain) {
+		t.Fatal("a TAGGED clean main head must be auto-publishable")
+	}
+	for name, ws := range map[string]sourcectx.WorkspaceState{
+		"feature branch": {Branch: "feat", HeadRevision: "abc"},
+		"dirty main":     {Branch: "main", HeadRevision: "abc", Dirty: true},
+		"dirty tagged":   {Branch: "main", HeadRevision: "abc", Tag: "v1", Dirty: true},
+		"detached tag":   {HeadRevision: "abc", Tag: "v1"},
+		"pr":             {Branch: "main", HeadRevision: "abc", PRNumber: 7},
+		"no git":         {},
 	} {
-		if catalogAutoPublishScope(scope) {
-			t.Fatalf("scope %q must not be auto-publishable", scope)
+		if catalogAutoPublishScope(ws) {
+			t.Fatalf("%s must not be auto-publishable", name)
 		}
 	}
 }

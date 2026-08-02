@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/configsurface"
 	"github.com/sourceplane/orun/internal/objremote"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/ui"
@@ -80,7 +81,7 @@ func validatePushToken(ctx context.Context, tokenSrc remotestate.TokenSource) er
 
 func runCatalogPush() error {
 	ctx := context.Background()
-	backendURL, err := requireBackendURL(nil, catalogPushBackendURL)
+	backendURL, err := requireBackendURL(loadIntentForCloudConfig(), catalogPushBackendURL)
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,10 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 		}
 		return fmt.Errorf("remote state auth: %w", err)
 	}
-	// Credential-agnostic CI (OCv2-2): adopt the OIDC-resolved scope where empty.
+	// Credential-agnostic CI (OCv2-2): adopt the OIDC-resolved scope where the
+	// local one is empty OR an intent-declared SLUG — state routes take prj_…
+	// ids only, and a slug 404s the whole sync ("catalog auto-sync skipped:
+	// … Route not found: …/projects/<slug>/state/objects/missing", hit live).
 	if oidcSrc, ok := tokenSrc.(*remotestate.OIDCTokenSource); ok {
 		if _, terr := oidcSrc.Token(ctx); terr != nil {
 			return fmt.Errorf("remote state auth (oidc exchange): %w", terr)
@@ -149,11 +153,20 @@ func pushResolvedCatalog(ctx context.Context, backendURL, orgFlag, projectFlag, 
 		if scope.OrgID == "" {
 			scope.OrgID = exOrg
 		}
-		if scope.ProjectID == "" {
+		if p := strings.TrimSpace(scope.ProjectID); (p == "" || !strings.HasPrefix(p, "prj_")) && exProject != "" {
 			scope.ProjectID = exProject
 		}
 	} else if err := validatePushToken(ctx, tokenSrc); err != nil {
 		return err
+	}
+	// Outside CI the same slug-vs-id gap applies (mirrors `orun run`, #606).
+	if p := strings.TrimSpace(scope.ProjectID); p != "" && !strings.HasPrefix(p, "prj_") && !isOSSBackend(backendURL) {
+		cs := configsurface.NewClient(backendURL, version, tokenSrc)
+		id, rerr := cs.ResolveProjectID(ctx, scope.OrgID, p)
+		if rerr != nil {
+			return fmt.Errorf("resolve project %q: %w", p, rerr)
+		}
+		scope.ProjectID = id
 	}
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	remoteStore, remoteRefs := client.RemoteStores()
