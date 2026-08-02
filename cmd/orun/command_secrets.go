@@ -450,6 +450,19 @@ func errWorkspaceRequired() error {
 	return fmt.Errorf("%s", b.String())
 }
 
+// projectID returns rt.project as a public prj_… id, resolving a slug via the
+// backend on first use (memoized). The repo link stores ids so linked repos
+// pass through; an intent-declared project is a slug and MUST be resolved —
+// config-surface routes 404 on slugs.
+func (rt *secretsRuntime) projectID(ctx context.Context) (string, error) {
+	id, err := rt.client.ResolveProjectID(ctx, rt.org, rt.project)
+	if err != nil {
+		return "", err
+	}
+	rt.project = id
+	return id, nil
+}
+
 // targetScope maps the rung-selector flags to a configsurface.Scope plus a
 // human label. With no selector: the project rung when defaultToProject (list),
 // otherwise an actionable missing---env error naming the declared envs.
@@ -474,6 +487,9 @@ func (rt *secretsRuntime) targetScope(ctx context.Context, defaultToProject bool
 		if strings.TrimSpace(rt.project) == "" {
 			return configsurface.Scope{}, "", errRepoNotLinked(rt.backendURL)
 		}
+		if _, err := rt.projectID(ctx); err != nil {
+			return configsurface.Scope{}, "", err
+		}
 		return configsurface.Scope{Kind: configsurface.ScopeProject, Org: rt.org, Project: rt.project},
 			fmt.Sprintf("project %q", rt.project), nil
 	case secretsWorkspFlag:
@@ -482,6 +498,9 @@ func (rt *secretsRuntime) targetScope(ctx context.Context, defaultToProject bool
 	case defaultToProject:
 		if strings.TrimSpace(rt.project) == "" {
 			return configsurface.Scope{}, "", errRepoNotLinked(rt.backendURL)
+		}
+		if _, err := rt.projectID(ctx); err != nil {
+			return configsurface.Scope{}, "", err
 		}
 		return configsurface.Scope{Kind: configsurface.ScopeProject, Org: rt.org, Project: rt.project},
 			fmt.Sprintf("project %q", rt.project), nil
@@ -495,6 +514,9 @@ func (rt *secretsRuntime) targetScope(ctx context.Context, defaultToProject bool
 func (rt *secretsRuntime) environmentScope(ctx context.Context, env string) (configsurface.Scope, string, error) {
 	if strings.TrimSpace(rt.project) == "" {
 		return configsurface.Scope{}, "", errRepoNotLinked(rt.backendURL)
+	}
+	if _, err := rt.projectID(ctx); err != nil {
+		return configsurface.Scope{}, "", err
 	}
 	envID, err := rt.client.ResolveEnvironmentID(ctx, rt.org, rt.project, env)
 	if err != nil {

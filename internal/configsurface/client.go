@@ -363,6 +363,13 @@ type Environment struct {
 	Name string `json:"name,omitempty"`
 }
 
+// Project is the minimal projects-list row the CLI needs (slug→id resolution).
+type Project struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name,omitempty"`
+}
+
 // Client speaks the config surface. It reuses the remotestate TokenSource so
 // auth resolution (session refresh, OIDC exchange) stays in one place.
 type Client struct {
@@ -373,6 +380,9 @@ type Client struct {
 	// envCache caches environment slug→id per (org, project) for the lifetime
 	// of one CLI invocation.
 	envCache map[string]map[string]string
+	// projectCache caches project slug→id per org for the lifetime of this
+	// client (one CLI invocation).
+	projectCache map[string]map[string]string
 }
 
 // NewClient creates a config-surface client for baseURL.
@@ -383,6 +393,7 @@ func NewClient(baseURL, version string, tokenSrc remotestate.TokenSource) *Clien
 		userAgent:  "orun-cli/" + version,
 		httpClient: &http.Client{Timeout: defaultTimeout},
 		envCache:   map[string]map[string]string{},
+		projectCache: map[string]map[string]string{},
 	}
 }
 
@@ -573,6 +584,75 @@ func (c *Client) ListEnvironments(ctx context.Context, org, project string) ([]E
 		return nil, fmt.Errorf("list environments: decoding response: %w", err)
 	}
 	return out, nil
+}
+
+// ListProjects calls GET /v1/organizations/{org}/projects.
+func (c *Client) ListProjects(ctx context.Context, org string) ([]Project, error) {
+	if strings.TrimSpace(org) == "" {
+		return nil, fmt.Errorf("configsurface: project listing needs an organization")
+	}
+	path := "/v1/organizations/" + urlSegment(org) + "/projects"
+	var body json.RawMessage
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &body, true); err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	items, _, err := decodeItems(body, "projects")
+	if err != nil {
+		return nil, fmt.Errorf("list projects: decoding response: %w", err)
+	}
+	var out []Project
+	if err := json.Unmarshal(items, &out); err != nil {
+		return nil, fmt.Errorf("list projects: decoding response: %w", err)
+	}
+	return out, nil
+}
+
+// ResolveProjectID resolves a project slug to its public prj_… id via the
+// projects list, caching per org for this invocation. A value that already
+// looks like a public id (prj_…) passes through. Config-surface routes take
+// project IDS only — an intent-declared project is a SLUG, and without this
+// hop every headless run without a local repo link 404s.
+func (c *Client) ResolveProjectID(ctx context.Context, org, project string) (string, error) {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return "", fmt.Errorf("configsurface: empty project")
+	}
+	if strings.HasPrefix(project, "prj_") {
+		return project, nil
+	}
+	if byslug, ok := c.projectCache[org]; ok {
+		if id, ok := byslug[strings.ToLower(project)]; ok {
+			return id, nil
+		}
+		return "", c.unknownProjectError(project, byslug)
+	}
+	projects, err := c.ListProjects(ctx, org)
+	if err != nil {
+		return "", err
+	}
+	byslug := make(map[string]string, len(projects))
+	for _, p := range projects {
+		if p.Slug != "" && p.ID != "" {
+			byslug[strings.ToLower(p.Slug)] = p.ID
+		}
+	}
+	c.projectCache[org] = byslug
+	if id, ok := byslug[strings.ToLower(project)]; ok {
+		return id, nil
+	}
+	return "", c.unknownProjectError(project, byslug)
+}
+
+func (c *Client) unknownProjectError(project string, byslug map[string]string) error {
+	if len(byslug) == 0 {
+		return fmt.Errorf("project %q not found: the workspace has no projects", project)
+	}
+	slugs := make([]string, 0, len(byslug))
+	for s := range byslug {
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+	return fmt.Errorf("project %q not found; available: %s", project, strings.Join(slugs, ", "))
 }
 
 // ResolveEnvironmentID resolves an environment slug to its public env_… id
