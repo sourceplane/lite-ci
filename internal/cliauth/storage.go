@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -453,12 +454,40 @@ func (s *defaultCredentialStore) Clear() error {
 
 type keychainCredentialStore struct{}
 
+// keychainUsable memoizes the default-keychain probe: every credential
+// operation consults available(), and the probe shells out.
+var keychainUsable = struct {
+	once sync.Once
+	ok   bool
+}{}
+
 func (s *keychainCredentialStore) available() bool {
+	// ORUN_CREDENTIAL_STORE picks the store explicitly: "file" for
+	// environments where the keychain misbehaves, "keychain" to force it
+	// (skipping the usability probe), empty/"auto" for the default.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ORUN_CREDENTIAL_STORE"))) {
+	case "file":
+		return false
+	case "keychain":
+		return runtime.GOOS == "darwin"
+	}
 	if runtime.GOOS != "darwin" {
 		return false
 	}
-	_, err := lookPath("security")
-	return err == nil
+	if _, err := lookPath("security"); err != nil {
+		return false
+	}
+	// A reachable `security` binary is NOT a usable keychain. In contexts
+	// with no default keychain (isolated HOME, launchd/CI sessions), a
+	// keychain write makes securityd throw a BLOCKING GUI dialog ("A
+	// keychain cannot be found to store …") on the console user's screen —
+	// and a failed or shadowed write loses the single-use rotating refresh
+	// token, revoking the whole session family. Probe the default keychain
+	// non-interactively and fall back to the file store when there is none.
+	keychainUsable.once.Do(func() {
+		keychainUsable.ok = execCommand("security", "default-keychain", "-d", "user").Run() == nil
+	})
+	return keychainUsable.ok
 }
 
 func (s *keychainCredentialStore) Load() (*Credentials, error) {
