@@ -64,12 +64,19 @@ func autopushEnabled(intent *model.Intent) bool {
 	return false
 }
 
-// catalogAutoPublishScope reports whether a source scope is eligible for
-// best-effort auto-publish: only the clean default branch. Feature branches,
-// dirty trees, no-git, PRs, and tags are excluded so auto-sync never moves the
+// catalogAutoPublishScope reports whether a source snapshot is eligible for
+// best-effort auto-publish: the clean default branch — INCLUDING when its
+// head commit is also tagged. Scope precedence ranks tag above branch, and a
+// release-tagging workflow that tags every main head silently disabled
+// auto-sync forever (hit live: a repo whose Docs library stayed empty
+// because each merge was immediately tagged). Feature branches, dirty
+// trees, no-git, and PRs stay excluded so auto-sync never moves the
 // project-wide head from non-canonical state.
-func catalogAutoPublishScope(scope string) bool {
-	return scope == catalogmodel.SourceScopeBranchMain
+func catalogAutoPublishScope(ws sourcectx.WorkspaceState) bool {
+	if ws.Scope() == catalogmodel.SourceScopeBranchMain {
+		return true
+	}
+	return ws.Tag != "" && !ws.Dirty && ws.Branch == "main"
 }
 
 // maybeAutoPushCatalog publishes the just-resolved catalog after a successful
@@ -83,19 +90,27 @@ func maybeAutoPushCatalog(ctx context.Context) {
 
 	intent := loadIntentForCloudConfig()
 	if !autopushEnabled(intent) {
+		autopushVerbosef("catalog auto-sync: disabled")
 		return
 	}
 	backendURL := resolveBackendURLWithConfig(intent, "")
 	if backendURL == "" {
-		return // autopush is meaningless without a backend to sync to
+		autopushVerbosef("catalog auto-sync: no backend url")
+		return
 	}
 
 	workspaceRoot, err := catalogWorkspaceRoot()
 	if err != nil {
+		autopushVerbosef("catalog auto-sync: workspace root: %v", err)
 		return
 	}
 	ws, err := sourcectx.ResolveSourceSnapshot(ctx, sourcectx.ResolveOptions{WorkspacePath: workspaceRoot})
-	if err != nil || !catalogAutoPublishScope(ws.Scope()) {
+	if err != nil || !catalogAutoPublishScope(ws) {
+		scope := "?"
+		if err == nil {
+			scope = ws.Scope()
+		}
+		autopushVerbosef("catalog auto-sync: scope gate (err=%v scope=%s)", err, scope)
 		return
 	}
 
@@ -103,13 +118,16 @@ func maybeAutoPushCatalog(ctx context.Context) {
 	// unchanged since the last successful auto-publish.
 	_, refs, omRoot, err := openObjectModel()
 	if err != nil {
+		autopushVerbosef("catalog auto-sync: object model: %v", err)
 		return
 	}
 	cur, err := refs.Read(ctx, catalogCurrentRef)
 	if err != nil {
+		autopushVerbosef("catalog auto-sync: ref read: %v", err)
 		return
 	}
 	if cur.Target == readAutopushMarker(omRoot) {
+		autopushVerbosef("catalog auto-sync: debounced (unchanged)")
 		return
 	}
 
