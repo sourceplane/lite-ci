@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // streamMu serializes streamed step-output lines across concurrently running
@@ -150,6 +151,12 @@ func runExec(ctx context.Context, s *Step, vars map[string]any, runDir string, s
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // declared argv, no shell (design §6)
 	cmd.Dir = cwd
 	cmd.Env = env
+	// Timeout must kill the whole process TREE, and Wait must not block on
+	// pipes an orphan still holds: group-kill on cancel (unix), and WaitDelay
+	// as the portable backstop that force-closes the pipes if anything
+	// survives the kill.
+	setProcGroup(cmd)
+	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
 	outStream := &lineStream{dst: log, prefix: s.Name}
 	errStream := &lineStream{dst: log, prefix: s.Name}
