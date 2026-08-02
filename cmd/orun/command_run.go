@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sourceplane/orun/internal/configsurface"
 	"github.com/sourceplane/orun/internal/execmodel"
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
@@ -535,9 +536,25 @@ func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, b
 		if scope.OrgID == "" {
 			scope.OrgID = exOrg
 		}
-		if scope.ProjectID == "" {
+		// The exchange's bound project is authoritative in CI: adopt it when
+		// the local scope is empty OR carries an intent-declared SLUG (state
+		// routes take prj_… ids only — a slug 404s, which resource-hiding
+		// then reports as "repo isn't connected", hit live).
+		if p := strings.TrimSpace(scope.ProjectID); (p == "" || !strings.HasPrefix(p, "prj_")) && exProject != "" {
 			scope.ProjectID = exProject
 		}
+	}
+	// Outside CI the same slug-vs-id gap applies (an intent-declared project
+	// outranks the repo link in resolveScope): resolve a non-id project via
+	// the projects list before any state path is built. The OSS backend's
+	// fixed "_local" scope is not a slug — leave it alone.
+	if p := strings.TrimSpace(scope.ProjectID); p != "" && !strings.HasPrefix(p, "prj_") && !isOSSBackend(backendURL) {
+		cs := configsurface.NewClient(backendURL, version, tokenSrc)
+		id, rerr := cs.ResolveProjectID(ctx, scope.OrgID, p)
+		if rerr != nil {
+			return fmt.Errorf("resolve project %q: %w", p, rerr)
+		}
+		scope.ProjectID = id
 	}
 	client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope)
 	runnerID := statebackend.DeriveRunnerID()
