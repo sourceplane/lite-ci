@@ -361,7 +361,7 @@ func TestBuildReplacementCommandOmitsUnpassedFlags(t *testing.T) {
 		Connection: conn, Workspace: true,
 	})
 	want := "orun integrations cloudflare secret create CF_TOKEN" +
-		" --connection " + conn + " --template workers-deploy --mode rotated --workspace"
+		" --connection " + conn + " --template workers-deploy --mode rotated --shared"
 	if got != want {
 		t.Fatalf("replacement command mismatch:\n got: %s\nwant: %s", got, want)
 	}

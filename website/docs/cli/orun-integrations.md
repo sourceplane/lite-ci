@@ -28,9 +28,9 @@ orun integrations <provider> templates retire|reactivate <ID>
 orun integrations sync
 ```
 
-Persistent flags: `--backend-url`, `--org <slug|id>`. Scope flags on
-secret-touching verbs: `--env <slug>`, `--project`, `--workspace`. `--json` on
-every leaf (metadata only).
+Persistent flags: `--backend-url`, `--workspace <ws-id|slug>` (`--org` is the
+legacy alias). Rung flags on secret-touching verbs: `--env <slug>`,
+`--project`, `--shared`. `--json` on every leaf (metadata only).
 
 Command grammar is validated **before** auth or network — a typo never
 round-trips, and every unknown provider, resource, or verb gets a
@@ -47,24 +47,21 @@ supabase    int_0456    acme-platform  active  auto                 2026-07-14
 ```
 
 The optional positional selects the workspace — a `ws_…` id or a slug —
-and is equivalent to `--org`:
+and is equivalent to `--workspace`:
 
 ```bash
 orun integrations list ws_7f3a
-orun integrations list acme      # slug works too
+orun integrations list acme        # slug works too
+orun integrations list --workspace acme
 ```
 
-:::note `--workspace` does not select a workspace here
-`--workspace` is the shared *scope-rung* boolean (workspace-scoped secrets),
-not workspace selection. To target another workspace, use the positional or
-`--org <ws-id|slug>`.
-:::
+Working in one workspace all day? Select it once with
+[`orun workspace use <ws>`](./orun-workspace.md) and drop the flag entirely.
 
-Passing both `--org X` and a different positional errors
+Passing both `--workspace X` and a different positional errors
 (`pass one`); a workspace that doesn't resolve gets a self-explaining error
-showing what was tried and where it came from (`--org` / `ORUN_WORKSPACE` /
-intent / repo link, in that order), how to see your orgs
-(`orun auth status`), and how to target another workspace.
+showing what was tried and where it came from, how to see your workspaces
+(`orun workspace list`), and how to target another one.
 
 ## `<provider> status`
 

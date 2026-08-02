@@ -49,7 +49,7 @@ var (
 )
 
 const integrationsUsageLine = `orun integrations list [workspace]
-  orun integrations <provider> connect [--org <ws>]   (token read from STDIN)
+  orun integrations <provider> connect [--workspace <ws>]   (token read from STDIN)
   orun integrations <provider> status
   orun integrations <provider> secret create <KEY> --connection <int_…> --template <id> [--mode brokered|rotated]
   orun integrations <provider> templates list
@@ -118,11 +118,9 @@ Examples:
 			// registry branch — with provider subtrees mounted, anything else
 			// reaching this RunE is an unknown provider, but `list` is ours.
 			if args[0] == "list" {
-				// `list [workspace]`: the positional is the natural spelling
-				// when pointing at another workspace ("orun integrations list
-				// ws_…"). --workspace cannot serve — it is the rung-targeting
-				// boolean on the secret verbs — so the positional and --org
-				// are the two selectors; both given and differing is a
+				// `list [workspace]`: the positional is the shorthand for
+				// pointing at another workspace ("orun integrations list ws_…"),
+				// equivalent to --workspace. Both given and differing is a
 				// contradiction, not a precedence puzzle.
 				if len(args) > 2 {
 					return fmt.Errorf("unexpected argument %q after \"list\"\n\nusage:\n  %s", args[2], integrationsUsageLine)
@@ -130,7 +128,7 @@ Examples:
 				if len(args) == 2 {
 					ws := strings.TrimSpace(args[1])
 					if secretsOrgFlag != "" && secretsOrgFlag != ws {
-						return fmt.Errorf("both --org %q and positional workspace %q given — pass one", secretsOrgFlag, ws)
+						return fmt.Errorf("both --workspace %q and positional workspace %q given — pass one", secretsOrgFlag, ws)
 					}
 					secretsOrgFlag = ws
 				}
@@ -171,7 +169,8 @@ Examples:
 		},
 	}
 	integrationsCmd.PersistentFlags().StringVar(&secretsBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	integrationsCmd.PersistentFlags().StringVar(&secretsOrgFlag, "org", "", "Workspace slug/id override for scope resolution (defaults to the linked workspace)")
+	addWorkspaceSelectorFlags(integrationsCmd.PersistentFlags())
+	integrationsCmd.SetFlagErrorFunc(decorateWorkspaceFlagError)
 	addSecretsScopeFlags(integrationsCmd)
 	addSecretsJSONFlag(integrationsCmd)
 	integrationsCmd.Flags().StringVar(&secretsConnection, "connection", "", "Integration connection public id (int_…) the value is minted against (required)")
@@ -237,7 +236,7 @@ func decorateConnectionsScopeErr(err error, org string) error {
 	if !strings.Contains(err.Error(), "not_found") {
 		return err
 	}
-	return fmt.Errorf("%w\n  workspace tried: %q (from --org / ORUN_WORKSPACE / intent / repo link, in that order)\n  that workspace does not exist or this session cannot access it — your orgs: `orun auth status`\n  target another workspace: `orun integrations list <ws-id|slug>` (or --org <ws-id|slug>)", err, org)
+	return fmt.Errorf("%w\n  workspace tried: %q (from %s)\n  that workspace does not exist or this session cannot access it — your workspaces: `orun workspace list`\n  target another one: `orun integrations list <ws-id|slug>` (or --workspace <ws-id|slug>, or `orun workspace use <ws>`)", err, org, workspaceResolutionOrder)
 }
 
 func runIntegrationsList(cmd *cobra.Command) error {
@@ -764,7 +763,7 @@ func buildReplacementCommand(spec replacementSpec) string {
 	case spec.Project:
 		parts = append(parts, "--project")
 	case spec.Workspace:
-		parts = append(parts, "--workspace")
+		parts = append(parts, "--shared")
 	}
 	return strings.Join(parts, " ")
 }

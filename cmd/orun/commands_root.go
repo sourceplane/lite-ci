@@ -254,6 +254,7 @@ func init() {
 	registerApproveCommand(rootCmd)
 	registerAuthCommand(rootCmd)
 	registerCloudCommand(rootCmd)
+	registerWorkspaceCommand(rootCmd)
 	registerBackendCommand(rootCmd)
 	registerValidateCommand(rootCmd)
 	registerDebugCommand(rootCmd)

@@ -15,6 +15,7 @@ import (
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/term"
 )
 
@@ -54,7 +55,8 @@ func registerSecretsCommand(root *cobra.Command) {
 metadata. The surface is write-only — values go up, only metadata comes back.
 
 Scope defaults to the linked project: --env <env> targets an environment rung,
---project the project-wide rung, --workspace the workspace-shared rung.`,
+--project the project-wide rung, --shared the workspace-shared rung. WHICH
+workspace is --workspace, or "orun workspace use <ws>" once for every command.`,
 		// The group itself has no action, but a RunE lets us intercept an
 		// unknown subcommand (a typo like `secrets revieal`) and fail with a
 		// "did you mean" suggestion and a non-zero exit — cobra would otherwise
@@ -67,7 +69,8 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 		},
 	}
 	secretsCmd.PersistentFlags().StringVar(&secretsBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	secretsCmd.PersistentFlags().StringVar(&secretsOrgFlag, "org", "", "Workspace slug/id override for scope resolution (defaults to the linked workspace)")
+	addWorkspaceSelectorFlags(secretsCmd.PersistentFlags())
+	secretsCmd.SetFlagErrorFunc(decorateWorkspaceFlagError)
 
 	setCmd := &cobra.Command{
 		Use:   "set <KEY>",
@@ -79,7 +82,7 @@ Scope defaults to the linked project: --env <env> targets an environment rung,
 	}
 	addSecretsScopeFlags(setCmd)
 	setCmd.Flags().BoolVar(&secretsPersonal, "personal", false, "Store a personal overlay for you only (environment scope)")
-	setCmd.Flags().BoolVar(&secretsLocked, "locked", false, "Lock the key so lower rungs cannot shadow it (implies --workspace)")
+	setCmd.Flags().BoolVar(&secretsLocked, "locked", false, "Lock the key so lower rungs cannot shadow it (implies --shared)")
 	setCmd.Flags().StringVar(&secretsValueFlag, "value", "", "Secret value (prefer stdin: --value may land in shell history)")
 	setCmd.Flags().StringVar(&secretsRotation, "rotation", "", "Rotation policy for the key")
 	setCmd.Flags().StringVar(&secretsDisplayName, "display-name", "", "Human display name for the key")
@@ -291,7 +294,7 @@ func revealPreflight(key string) error {
 		if len(envNames) > 0 {
 			hint = "<" + strings.Join(envNames, "|") + ">"
 		}
-		missing = append(missing, want{"--env " + hint, "which rung to reveal from (or --project / --workspace)"})
+		missing = append(missing, want{"--env " + hint, "which rung to reveal from (or --project / --shared)"})
 	}
 	if len(missing) == 0 {
 		return nil
@@ -317,19 +320,59 @@ func revealPreflight(key string) error {
 }
 
 // anySecretsScopeSelector reports whether the caller named any rung selector
-// (--env / --project / --workspace). Presence only; mutual-exclusion and slug
+// (--env / --project / --shared). Presence only; mutual-exclusion and slug
 // resolution are handled downstream by targetScope.
 func anySecretsScopeSelector() bool {
 	return strings.TrimSpace(secretsEnvFlag) != "" || secretsProjectFlag || secretsWorkspFlag
 }
 
 // addSecretsScopeFlags registers the rung-selector flags shared by set/list/
-// revoke. Within the secrets group --workspace/--project are scope selectors
-// (cli-surface §1); the org override spelling is the persistent --org.
+// revoke: which RUNG of the linked workspace a key is written to or read from.
+// WHICH workspace is a different question, and it is --workspace everywhere in
+// the CLI (addWorkspaceSelectorFlags) — so the workspace-shared rung is spelled
+// --shared here. `--ws-shared` stays as a hidden alias of it.
 func addSecretsScopeFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&secretsEnvFlag, "env", "", "Target environment (slug) on the linked project")
 	cmd.Flags().BoolVar(&secretsProjectFlag, "project", false, "Target the project-wide rung (every environment inherits)")
-	cmd.Flags().BoolVar(&secretsWorkspFlag, "workspace", false, "Target the workspace-shared rung")
+	cmd.Flags().BoolVar(&secretsWorkspFlag, "shared", false, "Target the workspace-shared rung (every project in the workspace inherits)")
+	cmd.Flags().BoolVar(&secretsWorkspFlag, "ws-shared", false, "Alias of --shared")
+	_ = cmd.Flags().MarkHidden("ws-shared")
+}
+
+// addWorkspaceSelectorFlags registers WHICH workspace a command targets. The
+// canonical spelling is --workspace, matching `orun run`, `orun cloud check`,
+// `orun catalog push`, ORUN_WORKSPACE, and `orun workspace use`; --org is the
+// legacy spelling, kept working (saas-workspaces A4). Both write one variable,
+// so the last one parsed wins — same as the other trees that carry the pair.
+func addWorkspaceSelectorFlags(flags *pflag.FlagSet) {
+	flags.StringVar(&secretsOrgFlag, "workspace", "", "Workspace to target: a ws_… id or slug (default: the selected workspace / the linked one)")
+	flags.StringVar(&secretsOrgFlag, "org", "", "Alias of --workspace (legacy spelling)")
+}
+
+// decorateWorkspaceFlagError rewrites the bare pflag parse error a caller gets
+// from the OLD boolean spelling of --workspace (the workspace-shared rung, now
+// --shared). "flag needs an argument: --workspace" is true but unhelpful when
+// the flag just changed meaning under you.
+func decorateWorkspaceFlagError(cmd *cobra.Command, err error) error {
+	if err == nil || !strings.Contains(err.Error(), "--workspace") {
+		return err
+	}
+	if !strings.Contains(err.Error(), "needs an argument") {
+		return err
+	}
+	return fmt.Errorf("%w\n  --workspace now names WHICH workspace: `--workspace <ws-id|slug>` (or `orun workspace use <ws>` once)\n  the workspace-shared RUNG is `--shared`", err)
+}
+
+// validateWorkspaceFlagValue catches the other half of that migration, the half
+// pflag accepts silently: `--workspace --json` consumes the NEXT FLAG as the
+// workspace. A leading dash is never a workspace, so say so instead of sending
+// "--json" to the backend as a tenancy.
+func validateWorkspaceFlagValue() error {
+	ws := strings.TrimSpace(secretsOrgFlag)
+	if !strings.HasPrefix(ws, "-") {
+		return nil
+	}
+	return fmt.Errorf("--workspace %s: that is a flag, not a workspace — pass `--workspace <ws-id|slug>`\n  (the workspace-shared rung is `--shared`, which takes no value)", ws)
 }
 
 // secretsRuntime carries the resolved backend, auth, and org/project scope
@@ -346,6 +389,9 @@ type secretsRuntime struct {
 // config), the org/project scope (--org flag > ORUN_WORKSPACE/ORUN_ORG >
 // intent execution.state > cached RepoLink), and a bearer token source.
 func newSecretsRuntime(ctx context.Context) (*secretsRuntime, error) {
+	if err := validateWorkspaceFlagValue(); err != nil {
+		return nil, err
+	}
 	intent := loadIntentForCloudConfig()
 	backendURL, err := requireBackendURL(intent, secretsBackendURL)
 	if err != nil {
@@ -358,7 +404,7 @@ func newSecretsRuntime(ctx context.Context) (*secretsRuntime, error) {
 	intentOrg, intentProject, _ := intentScope(intent)
 	scope := resolveScope(secretsOrgFlag, "", intentOrg, intentProject, linkOrg, linkProject)
 	if strings.TrimSpace(scope.OrgID) == "" {
-		return nil, errRepoNotLinked(backendURL)
+		return nil, errWorkspaceRequired()
 	}
 	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
 		BackendURL:   backendURL,
@@ -382,6 +428,28 @@ func newSecretsRuntime(ctx context.Context) (*secretsRuntime, error) {
 	}, nil
 }
 
+// errWorkspaceRequired is the fail-fast error when no workspace resolves for a
+// workspace-scoped command (`orun secrets …`, `orun integrations …`). The repo
+// link is only the LAST of four sources, so "this repo isn't connected" is the
+// wrong ask for a logged-in user with workspaces: what is missing is the
+// selection, not the login. Names the sources checked, lists the session's own
+// workspaces so the next command can be typed without a second lookup, and
+// offers the link as the way to stop passing it.
+func errWorkspaceRequired() error {
+	orgs := sessionOrgs()
+	var b strings.Builder
+	b.WriteString("specify a workspace: none is selected and none resolves here")
+	b.WriteString("\n  checked: " + workspaceResolutionOrder)
+	if len(orgs) == 0 {
+		b.WriteString("\n  this session belongs to no workspaces — check it with `orun auth status`, or create one: `orun workspace create <name>`")
+		return fmt.Errorf("%s", b.String())
+	}
+	b.WriteString("\n  your workspaces: " + joinOrgLabels(orgs))
+	b.WriteString(fmt.Sprintf("\n  pick one for good: `orun workspace use %s`", orgs[0].Label))
+	b.WriteString("\n  or for this command only: `--workspace <ws-id|slug>`")
+	return fmt.Errorf("%s", b.String())
+}
+
 // targetScope maps the rung-selector flags to a configsurface.Scope plus a
 // human label. With no selector: the project rung when defaultToProject (list),
 // otherwise an actionable missing---env error naming the declared envs.
@@ -397,7 +465,7 @@ func (rt *secretsRuntime) targetScope(ctx context.Context, defaultToProject bool
 		selectors++
 	}
 	if selectors > 1 {
-		return configsurface.Scope{}, "", fmt.Errorf("--env, --project, and --workspace are mutually exclusive")
+		return configsurface.Scope{}, "", fmt.Errorf("--env, --project, and --shared are mutually exclusive")
 	}
 	switch {
 	case strings.TrimSpace(secretsEnvFlag) != "":
@@ -441,7 +509,7 @@ func (rt *secretsRuntime) environmentScope(ctx context.Context, env string) (con
 func (rt *secretsRuntime) errEnvRequired(scopeFlagsAllowed bool) error {
 	alt := ""
 	if scopeFlagsAllowed {
-		alt = " (or --project / --workspace for a project- or workspace-scoped secret)"
+		alt = " (or --project / --shared for a project- or workspace-scoped secret)"
 	}
 	if names := intentEnvironmentNames(rt.intent); len(names) > 0 {
 		return fmt.Errorf("missing --env; declared environments: %s%s", strings.Join(names, ", "), alt)
@@ -524,7 +592,7 @@ func runSecretsSet(cmd *cobra.Command, key string) error {
 	// --locked implies/requires the workspace rung (SD-12′).
 	if secretsLocked {
 		if strings.TrimSpace(secretsEnvFlag) != "" || secretsProjectFlag {
-			return fmt.Errorf("--locked applies to the workspace rung only; use --locked with --workspace (or alone)")
+			return fmt.Errorf("--locked applies to the workspace-shared rung only; use --locked with --shared (or alone)")
 		}
 		secretsWorkspFlag = true
 	}
@@ -989,7 +1057,7 @@ func listHintFlags(scope configsurface.Scope) string {
 	case configsurface.ScopeEnvironment:
 		return " --env " + strings.TrimSpace(secretsEnvFlag)
 	case configsurface.ScopeWorkspace:
-		return " --workspace"
+		return " --shared"
 	default:
 		return ""
 	}

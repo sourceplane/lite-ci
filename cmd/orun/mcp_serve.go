@@ -249,7 +249,7 @@ func mcpVerboseSummary(r mcpMountReport) string {
 	if r.workspace != "" {
 		line("workspace", r.workspace+" (from "+r.workspaceSource+")")
 	} else {
-		line("workspace", "none resolved (checked --workspace, ORUN_WORKSPACE/ORUN_ORG, intent.yaml execution.state, the repo link)")
+		line("workspace", "none resolved (checked "+workspaceResolutionOrder+")")
 	}
 	plane := func(mounted bool, reason string) string {
 		if mounted {

@@ -17,7 +17,7 @@ title: Environment variables
 | `ORUN_REMOTE_STATE` | Set to `true` to enable remote state coordination via orun-backend |
 | `ORUN_BACKEND_URL` | URL of the orun-backend instance (required when `ORUN_REMOTE_STATE=true`) |
 | `ORUN_TOKEN` | Explicit short-lived Orun machine token fallback for CI or automation — honored by every auth path, including `orun cloud link`/`check`, so headless containers can self-link without a browser login. Normal local remote-state usage should use `orun auth login`, not a GitHub PAT |
-| `ORUN_WORKSPACE` | Workspace scope for remote state — a Workspace ID `ws_…`, slug, or `org_…`; overrides the linked workspace. Equivalent to `--workspace` |
+| `ORUN_WORKSPACE` | Workspace scope for remote state — a Workspace ID `ws_…`, slug, or `org_…`; overrides the linked workspace and the workspace selected with [`orun workspace use`](../cli/orun-workspace.md). Equivalent to `--workspace` |
 | `ORUN_ORG` | Retained alias of `ORUN_WORKSPACE` — org scope (slug or ID) for remote state; overrides the linked org and disambiguates auto-link when you belong to several. Equivalent to `--org` (the CLI reads either and prefers `ORUN_WORKSPACE`) |
 | `ORUN_PROJECT` | Project scope for remote state — overrides the linked project. Equivalent to `--project` |
 | `ORUN_COORDINATION` | Set to `legacy` to fall back to the decommissioned OP2 relational coordination path. Native v2 event-sourced coordination is the default for `orun run --remote-state` |

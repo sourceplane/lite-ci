@@ -30,7 +30,10 @@ orun secrets <subcommand> [KEY] [flags]
 | `versions <KEY>` | List the version history. |
 | `reveal <KEY> --break-glass --reason <why>` | Print a value — deliberately loud. Requires both flags; the preflight reports **every** missing precondition together (break-glass, reason, scope) with a ready-to-run example, not one error at a time. |
 
-Persistent flags: `--backend-url`, `--org <slug|id>` (workspace selection).
+Persistent flags: `--backend-url`, `--workspace <ws-id|slug>` (which workspace
+to talk to; `--org` is the legacy alias). Select one once with
+[`orun workspace use <ws>`](./orun-workspace.md) and every command below
+inherits it.
 
 ### Scope selection
 
@@ -40,10 +43,17 @@ Every subcommand that touches a secret accepts the shared scope selector:
 |---|---|
 | `--env <slug>` | Environment scope (within the linked project) |
 | `--project` | Project scope (boolean — the linked project) |
-| `--workspace` | Workspace scope (boolean) |
+| `--shared` | Workspace-shared scope (boolean — every project inherits) |
 
 Workspace- and project-scoped secrets are fully reachable from the CLI —
 `reveal`, `rotate`, and `versions` all take the selector, not just `--env`.
+
+:::note `--shared` is the rung; `--workspace` is the tenancy
+`--shared` picks *which rung of this workspace* a key lives at. `--workspace`
+picks *which workspace* the command talks to. `--workspace` used to be the
+rung boolean; the old spelling now fails with a one-line pointer to `--shared`
+rather than silently changing meaning.
+:::
 
 ### `set` flags
 
@@ -51,7 +61,7 @@ Workspace- and project-scoped secrets are fully reachable from the CLI —
 |---|---|
 | `--value` | The static value. Mutually exclusive with `--from-broker`. |
 | `--personal` | A personal (owner-only) secret. |
-| `--locked` | Lock the secret (implies `--workspace`). |
+| `--locked` | Lock the secret (implies `--shared`). |
 | `--rotation <cadence>` | Rotation cadence for a rotated secret (e.g. `30d`). |
 | `--display-name <s>` | Human display name. |
 | `--from-broker <provider/template>` | Create a provider-rotated secret from a connected parent (deprecated spelling — see below). |
@@ -86,7 +96,7 @@ orun secrets set CF_API_TOKEN --from-broker cloudflare/workers-deploy \
 orun secrets rotate CF_API_TOKEN --remint
 
 # Inspect a workspace-scoped secret's history
-orun secrets versions SHARED_LICENSE_KEY --workspace --json
+orun secrets versions SHARED_LICENSE_KEY --shared --json
 
 # Reveal — loud and audited, both flags required
 orun secrets reveal DATABASE_URL --env prod --break-glass --reason "incident #4711"

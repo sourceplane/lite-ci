@@ -48,7 +48,8 @@ list, show, and lint are offline: they load the resolved Stack and the repo's
 policies/ overlays. test and push talk to Orun Cloud.`,
 	}
 	policyCmd.PersistentFlags().StringVar(&policyBackendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	policyCmd.PersistentFlags().StringVar(&policyOrgFlag, "org", "", "Workspace slug/id override for scope resolution (defaults to the linked workspace)")
+	policyCmd.PersistentFlags().StringVar(&policyOrgFlag, "workspace", "", "Workspace to target: a ws_… id or slug (default: the selected workspace / the linked one)")
+	policyCmd.PersistentFlags().StringVar(&policyOrgFlag, "org", "", "Alias of --workspace (legacy spelling)")
 
 	listCmd := &cobra.Command{
 		Use:   "list",

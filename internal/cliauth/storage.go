@@ -116,6 +116,36 @@ func SaveConfig(cfg *Config) error {
 	return nil
 }
 
+// SelectedWorkspace reads the working workspace chosen with `orun workspace
+// use`. It is consulted on the resolution path of every workspace-scoped
+// command, so it never fails the caller: an unreadable or absent config is
+// simply "nothing selected".
+func SelectedWorkspace() WorkspaceSelection {
+	cfg, err := LoadConfig()
+	if err != nil || cfg == nil {
+		return WorkspaceSelection{}
+	}
+	return cfg.Workspace
+}
+
+// SelectWorkspace persists the working workspace, preserving the rest of the
+// config file. Passing an empty id clears the selection.
+func SelectWorkspace(sel WorkspaceSelection) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		cfg = &Config{}
+	}
+	cfg.Workspace = WorkspaceSelection{
+		ID:    strings.TrimSpace(sel.ID),
+		Slug:  strings.TrimSpace(sel.Slug),
+		SetAt: strings.TrimSpace(sel.SetAt),
+	}
+	return SaveConfig(cfg)
+}
+
 // SaveSession stores session credentials and updates the default backend URL.
 func SaveSession(creds *Credentials) error {
 	if creds == nil {
