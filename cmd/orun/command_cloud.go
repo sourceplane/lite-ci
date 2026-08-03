@@ -115,14 +115,24 @@ CLI session or ORUN_TOKEN (headless).`,
 // read lazily on every command so a 15-minute session token stays fresh
 // across an hour-long bootstrap; a once-exported env var would not).
 func headlessToken() string {
-	if t := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); t != "" {
-		return t
-	}
+	// The FILE wins when both are set: it refreshes for the process's whole
+	// life, while an env copy is frozen at export time. In the sandbox the
+	// platform sets ORUN_TOKEN_FILE and the session credential rotates every
+	// ~15 minutes — an agent that ran `export ORUN_TOKEN=$(cat $ORUN_TOKEN_FILE)`
+	// (observed live, against its own brief) doomed every call after the next
+	// rotation. Outside a sandbox ORUN_TOKEN_FILE is only ever set on purpose,
+	// so preferring it never surprises an env-only user.
 	if path := strings.TrimSpace(os.Getenv("ORUN_TOKEN_FILE")); path != "" {
 		src := remotestate.NewFileTokenSource(path)
 		if t, err := src.Token(context.Background()); err == nil {
+			if env := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); env != "" && env != t {
+				fmt.Fprintln(os.Stderr, "orun: both ORUN_TOKEN and ORUN_TOKEN_FILE are set — using the file (it refreshes; the env copy expires)")
+			}
 			return t
 		}
+	}
+	if t := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); t != "" {
+		return t
 	}
 	return ""
 }

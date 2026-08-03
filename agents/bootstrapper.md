@@ -22,7 +22,11 @@ tools:
           # The brief mandates running the umbrella in the background and
           # monitoring it — the harness's background-task plumbing must pass
           # (TaskStop was denied live and the agent could not stop a stale run).
-          BashOutput, KillShell, TaskOutput, TaskStop]
+          BashOutput, KillShell, TaskOutput, TaskStop,
+          # The intake IS a question to the operator — the harness's question
+          # tool renders it as structured AG-UI in the cockpit (denied lanes
+          # made the agent fall back to plain prose, observed live).
+          AskUserQuestion]
   ask: [contract_propose, task_assign]
   deny: ["*"]
 owner: sourceplane/team/platform
