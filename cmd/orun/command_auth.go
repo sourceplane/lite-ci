@@ -85,9 +85,9 @@ func runAuthStatus() error {
 			// Headless runs authenticate from the environment, not a stored
 			// session — reporting "not logged in" with ORUN_TOKEN set sends
 			// operators chasing a non-existent auth problem (hit live).
-			if strings.TrimSpace(os.Getenv("ORUN_TOKEN")) != "" {
+			if headlessToken() != "" {
 				color := ui.ColorEnabledForWriter(os.Stdout)
-				fmt.Printf("%s headless: authenticated via ORUN_TOKEN (no stored session)\n", ui.Green(color, "✓"))
+				fmt.Printf("%s headless: authenticated via ORUN_TOKEN/ORUN_TOKEN_FILE (no stored session)\n", ui.Green(color, "✓"))
 				if backendURL != "" {
 					fmt.Printf("Backend URL: %s\n", backendURL)
 				}

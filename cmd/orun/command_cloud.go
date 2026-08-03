@@ -109,8 +109,26 @@ CLI session or ORUN_TOKEN (headless).`,
 // table row 2: "run `orun auth login`"). Headless environments (containers,
 // CI drivers) authenticate with ORUN_TOKEN instead of a stored session —
 // honored here like everywhere else the CLI resolves auth.
+
+// headlessToken returns the ambient headless bearer: ORUN_TOKEN, else the
+// content of ORUN_TOKEN_FILE (the agent runtime's REFRESHED token channel —
+// read lazily on every command so a 15-minute session token stays fresh
+// across an hour-long bootstrap; a once-exported env var would not).
+func headlessToken() string {
+	if t := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); t != "" {
+		return t
+	}
+	if path := strings.TrimSpace(os.Getenv("ORUN_TOKEN_FILE")); path != "" {
+		src := remotestate.NewFileTokenSource(path)
+		if t, err := src.Token(context.Background()); err == nil {
+			return t
+		}
+	}
+	return ""
+}
+
 func cloudSessionToken(ctx context.Context, backendURL string) (string, error) {
-	if token := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); token != "" {
+	if token := headlessToken(); token != "" {
 		return token, nil
 	}
 	creds, err := cliauth.LoadSession()
@@ -141,8 +159,8 @@ func errNotLoggedIn() error {
 	// With ORUN_TOKEN set, "set ORUN_TOKEN" is insulting noise: this path is
 	// then reached because the operation needs something the token cannot
 	// provide (e.g. a memberships list — workspace-scoped keys have none).
-	if strings.TrimSpace(os.Getenv("ORUN_TOKEN")) != "" {
-		return fmt.Errorf("ORUN_TOKEN is set, but this operation needs a stored session or a membership listing the token does not have (workspace-scoped keys list no memberships — resolve identity with `orun workspace <ws-id-or-slug>` instead)")
+	if headlessToken() != "" {
+		return fmt.Errorf("a headless token is set (ORUN_TOKEN/ORUN_TOKEN_FILE), but this operation needs a stored session or a membership listing the token does not have (workspace-scoped keys list no memberships — resolve identity with `orun workspace <ws-id-or-slug>` instead)")
 	}
 	return fmt.Errorf("not logged in to Orun Cloud; run `orun auth login` (or set ORUN_TOKEN for headless runs)")
 }
@@ -393,7 +411,7 @@ func sessionOrgs() []orgChoice {
 		// Headless (ORUN_TOKEN): no stored session — list from the backend so
 		// `workspace list/use/show` (and everything that resolves slugs from
 		// them) work in containers too.
-		if token := strings.TrimSpace(os.Getenv("ORUN_TOKEN")); token != "" {
+		if token := headlessToken(); token != "" {
 			if backendURL, bErr := requireBackendURL(loadIntentForCloudConfig(), cloudBackendURL); bErr == nil {
 				client := cliauth.NewBackendClient(backendURL, version)
 				if orgs, lErr := client.ListMyOrgs(context.Background(), token); lErr == nil {
