@@ -18,7 +18,11 @@ tools:
   # one conversation, not a fleet.
   allow: [work_query, work_get, spec_get, catalog_get_component, catalog_affected, task_comment, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead,
-          Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
+          Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch,
+          # The brief mandates running the umbrella in the background and
+          # monitoring it — the harness's background-task plumbing must pass
+          # (TaskStop was denied live and the agent could not stop a stale run).
+          BashOutput, KillShell, TaskOutput, TaskStop]
   ask: [contract_propose, task_assign]
   deny: ["*"]
 owner: sourceplane/team/platform
