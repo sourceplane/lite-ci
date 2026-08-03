@@ -241,6 +241,11 @@ func TestClaudeCodeMappingBasic(t *testing.T) {
 	if !ok || tc.Fields["tool"] != "mcp__orun__work_get" || tc.Fields["toolUseId"] != "tu1" {
 		t.Fatalf("tool_call = %+v", tc)
 	}
+	// The input rides along, compacted — the durable event must say WHAT ran,
+	// not only that something did.
+	if tc.Fields["args"] != `{"key":"ORN-142"}` {
+		t.Fatalf("tool_call args = %v, want the compacted input", tc.Fields["args"])
+	}
 	tr, ok := c.first(EventToolResult)
 	if !ok || !strings.Contains(tr.Text, "ORN-142") {
 		t.Fatalf("tool_result = %+v", tr)
@@ -353,5 +358,23 @@ func TestClaudeCodeLiveSmoke(t *testing.T) {
 		if e.Kind == EventDone {
 			return
 		}
+	}
+}
+
+func TestCompactArgs(t *testing.T) {
+	// Empty, null, and {} all read as "no args" — the event carries nothing
+	// rather than noise; oversized inputs are capped, never archived whole.
+	for _, empty := range []string{"", "null", "{}", "  "} {
+		if got := compactArgs([]byte(empty)); got != "" {
+			t.Errorf("compactArgs(%q) = %q, want empty", empty, got)
+		}
+	}
+	if got := compactArgs([]byte(`{ "a" : 1 }`)); got != `{"a":1}` {
+		t.Errorf("compactArgs = %q, want compacted", got)
+	}
+	big := `{"cmd":"` + strings.Repeat("x", argsCap*2) + `"}`
+	got := compactArgs([]byte(big))
+	if len(got) > argsCap+len("…") || !strings.HasSuffix(got, "…") {
+		t.Errorf("oversized args not capped: len=%d", len(got))
 	}
 }

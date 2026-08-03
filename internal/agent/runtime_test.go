@@ -99,7 +99,7 @@ func TestRunLoopDeniedAndAskTools(t *testing.T) {
 	brief, _ := AssembleBrief(ctx, store, BriefInput{RunKind: nodes.RunKindImplementation, Task: "ORN-1"})
 
 	script := []driver.Event{
-		{Kind: driver.EventToolCall, Text: "x", Fields: map[string]any{"tool": "danger_delete"}},
+		{Kind: driver.EventToolCall, Text: "x", Fields: map[string]any{"tool": "danger_delete", "args": `{"path":"/"}`}},
 		{Kind: driver.EventApproval, Text: "may I propose a contract?", RequestID: "r1"},
 		{Kind: driver.EventDone, Fields: map[string]any{"status": "completed"}},
 	}
@@ -127,6 +127,10 @@ func TestRunLoopDeniedAndAskTools(t *testing.T) {
 		if e.Kind == nodes.SessionEventToolCall {
 			if d, _ := e.Payload["decision"].(string); d == "deny" {
 				deniedLogged = true
+			}
+			// The durable record carries WHAT the call was, not only the ruling.
+			if a, _ := e.Payload["args"].(string); a != `{"path":"/"}` {
+				t.Errorf("tool_call payload args = %v, want the driver's input string", e.Payload["args"])
 			}
 		}
 		if e.Kind == nodes.SessionEventApprovalResolved {

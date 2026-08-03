@@ -292,7 +292,13 @@ func (l *runLoop) foldEvent(e driver.Event) {
 		// other direction. Without it every policy-ALLOWED MCP tool was logged
 		// as denied here (the authority disagreeing with its own config).
 		dec := opts.Policy.Decide(policyToolName(tool))
-		log.Append(nodes.SessionEventToolCall, map[string]any{"tool": tool, "decision": dec.String()}, "")
+		payload := map[string]any{"tool": tool, "decision": dec.String()}
+		// The driver's compacted, capped input string — the durable record of
+		// WHAT the call was, not just how policy ruled on it.
+		if args, _ := e.Fields["args"].(string); args != "" {
+			payload["args"] = args
+		}
+		log.Append(nodes.SessionEventToolCall, payload, "")
 		if dec == DecisionDeny {
 			log.Append(nodes.SessionEventError, map[string]any{
 				"tool": tool, "error": "denied by tool policy",

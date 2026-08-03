@@ -2,6 +2,7 @@ package driver
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -210,8 +211,14 @@ func (d *ClaudeCode) readStream(ctx context.Context, r io.Reader, io IO, w *stdi
 						}
 					}
 				case "tool_use":
-					if !send(Event{Kind: EventToolCall, Text: blk.Name,
-						Fields: map[string]any{"tool": blk.Name, "toolUseId": blk.ID}}) {
+					fields := map[string]any{"tool": blk.Name, "toolUseId": blk.ID}
+					// Carry the input so the durable event can say WHAT ran —
+					// a tool row reading only its policy decision told the
+					// operator nothing (observed live in the cockpit).
+					if args := compactArgs(blk.Input); args != "" {
+						fields["args"] = args
+					}
+					if !send(Event{Kind: EventToolCall, Text: blk.Name, Fields: fields}) {
 						return
 					}
 				}
@@ -387,7 +394,34 @@ type claudeBlock struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	ToolUseID string          `json:"tool_use_id"`
+	Input     json.RawMessage `json:"input"`
 	Content   json.RawMessage `json:"content"`
+}
+
+// argsCap bounds the tool-input string that rides a tool_call event: the
+// cockpit needs to show WHAT ran, not archive it — a durable event is not a
+// place for a 200 KB Write payload.
+const argsCap = 2000
+
+// compactArgs renders a tool_use input as a single compact JSON string,
+// capped. Empty or unparseable input reads as "" — the event simply carries
+// no args rather than garbage.
+func compactArgs(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return ""
+	}
+	s := buf.String()
+	if s == "{}" || s == "null" {
+		return ""
+	}
+	if len(s) > argsCap {
+		s = s[:argsCap] + "…"
+	}
+	return s
 }
 
 type claudeSSEEvent struct {
