@@ -237,6 +237,9 @@ func (d *ClaudeCode) readStream(ctx context.Context, r io.Reader, io IO, w *stdi
 			// runtime's approval loop; the verdict returns via io.Approve →
 			// pump → control_response.
 			if m.Request != nil && m.Request.Subtype == "can_use_tool" {
+				// Keep the request's input: the allow verdict must echo it
+				// back as `updatedInput` (required by the harness's schema).
+				w.rememberInput(m.RequestID, m.Request.Input)
 				if !send(Event{Kind: EventApproval, RequestID: m.RequestID, Text: "requesting " + m.Request.ToolName,
 					Fields: map[string]any{"tool": m.Request.ToolName, "requestId": m.RequestID, "args": m.Request.Input}}) {
 					return
@@ -299,6 +302,29 @@ func (p *claudeProc) Wait() error {
 type stdinWriter struct {
 	mu sync.Mutex
 	w  io.Writer
+	// pendingInputs remembers each can_use_tool request's input by request id:
+	// the harness's allow branch REQUIRES `updatedInput` (a record), and the
+	// only honest record to return is the input it asked about, unchanged.
+	pendingInputs map[string]map[string]any
+}
+
+// rememberInput stores a control request's input for the verdict write.
+func (s *stdinWriter) rememberInput(requestID string, input map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingInputs == nil {
+		s.pendingInputs = map[string]map[string]any{}
+	}
+	s.pendingInputs[requestID] = input
+}
+
+// takeInput returns (and forgets) the stored input for a request id.
+func (s *stdinWriter) takeInput(requestID string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in := s.pendingInputs[requestID]
+	delete(s.pendingInputs, requestID)
+	return in
 }
 
 func (s *stdinWriter) writeJSON(v any) {
@@ -323,14 +349,22 @@ func (s *stdinWriter) writeUserText(text string) {
 
 func (s *stdinWriter) writeControlResponse(v Verdict) {
 	// The can_use_tool result contract (the harness validates it strictly):
-	//   {behavior: "allow", updatedInput?: object}  |  {behavior: "deny", message: string}
-	// An allow carries NO message field (the old shape put one there); a deny
-	// must always carry a non-empty message — it becomes the tool error the
-	// model reads, so an empty reason would deny without saying why.
+	//   {behavior: "allow", updatedInput: record}  |  {behavior: "deny", message: string}
+	// `updatedInput` became REQUIRED on the allow branch (observed live: a
+	// bare allow failed the harness's union with "expected record, received
+	// undefined" and every approved call errored) — we return the request's
+	// own input, unchanged. An allow carries NO message field; a deny must
+	// always carry a non-empty message — it becomes the tool error the model
+	// reads, so an empty reason would deny without saying why.
 	var result map[string]any
 	if v.Approved {
-		result = map[string]any{"behavior": "allow"}
+		input := s.takeInput(v.RequestID)
+		if input == nil {
+			input = map[string]any{}
+		}
+		result = map[string]any{"behavior": "allow", "updatedInput": input}
 	} else {
+		s.takeInput(v.RequestID) // forget the stored input either way
 		msg := v.Reason
 		if msg == "" {
 			msg = "denied"

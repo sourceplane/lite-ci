@@ -186,16 +186,21 @@ func TestClaudeCodeLaunchArgsRoutePermissionsToStdio(t *testing.T) {
 }
 
 // TestControlResponseShapes pins the can_use_tool result contract the harness
-// validates strictly: allow = {behavior} alone (no message key), deny =
-// {behavior, message} with message never empty.
+// validates strictly: allow = {behavior, updatedInput: record} with the
+// request's own input echoed back (a BARE allow fails the harness's union —
+// observed live: every approved call errored "expected record, received
+// undefined"), deny = {behavior, message} with message never empty.
 func TestControlResponseShapes(t *testing.T) {
 	var buf bytes.Buffer
 	w := &stdinWriter{w: &buf}
+	w.rememberInput("r1", map[string]any{"command": "orun version"})
 	w.writeControlResponse(Verdict{RequestID: "r1", Approved: true, Reason: "lgtm"})
 	w.writeControlResponse(Verdict{RequestID: "r2", Approved: false})
+	// No remembered input (a resume, a race): still a record, never undefined.
+	w.writeControlResponse(Verdict{RequestID: "r3", Approved: true})
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("wrote %d lines, want 2", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("wrote %d lines, want 3", len(lines))
 	}
 	decode := func(line string) map[string]any {
 		var m struct {
@@ -216,9 +221,20 @@ func TestControlResponseShapes(t *testing.T) {
 	if _, has := allow["message"]; has {
 		t.Fatalf("allow result carries a message field: %v", allow)
 	}
+	updated, ok := allow["updatedInput"].(map[string]any)
+	if !ok || updated["command"] != "orun version" {
+		t.Fatalf("allow updatedInput = %v, want the request's own input echoed back", allow["updatedInput"])
+	}
 	deny := decode(lines[1])
 	if deny["behavior"] != "deny" || deny["message"] != "denied" {
 		t.Fatalf("deny result = %v, want behavior=deny message=denied", deny)
+	}
+	if _, has := deny["updatedInput"]; has {
+		t.Fatalf("deny result carries updatedInput: %v", deny)
+	}
+	bare := decode(lines[2])
+	if u, ok := bare["updatedInput"].(map[string]any); !ok || u == nil {
+		t.Fatalf("allow without remembered input must still carry a record: %v", bare)
 	}
 }
 
