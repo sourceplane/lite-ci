@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
@@ -1441,9 +1443,24 @@ func resolveOCIDigest(remoteRef string) (string, error) {
 		return "", err
 	}
 
-	desc, err := repo.Resolve(ctx, ref)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve OCI ref %s: %w", remoteRef, err)
+	// Registries throw transient 5xx/timeouts; a single-shot resolve took
+	// down a whole apply (and poisoned its retry) over a GHCR 503 that
+	// cleared seconds later. Three attempts with backoff; non-transient
+	// errors (404, auth) fail on the first try.
+	var desc ocispec.Descriptor
+	for attempt := 1; ; attempt++ {
+		desc, err = repo.Resolve(ctx, ref)
+		if err == nil {
+			break
+		}
+		msg := err.Error()
+		transient := strings.Contains(msg, "503") || strings.Contains(msg, "502") ||
+			strings.Contains(msg, "500") || strings.Contains(msg, "timeout") ||
+			strings.Contains(msg, "connection reset") || strings.Contains(msg, "EOF")
+		if !transient || attempt >= 3 {
+			return "", fmt.Errorf("failed to resolve OCI ref %s: %w", remoteRef, err)
+		}
+		time.Sleep(time.Duration(attempt*3) * time.Second)
 	}
 	return desc.Digest.String(), nil
 }

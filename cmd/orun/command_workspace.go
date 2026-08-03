@@ -40,6 +40,13 @@ always names the rung that actually won.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
+				// "show"/"current" are what people naturally type for the
+				// bare behavior — resolving them as workspace NAMES sent a
+				// nonsense request upstream (GET /organizations/show, live).
+				switch args[0] {
+				case "show", "current":
+					return runWorkspaceShow()
+				}
 				return runWorkspaceShowRemote(cmd.Context(), args[0])
 			}
 			return runWorkspaceShow()

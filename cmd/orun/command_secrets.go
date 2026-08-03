@@ -715,7 +715,12 @@ func renderSecretsWriteError(err error, key string) error {
 		case apiErr.IsLocked():
 			return fmt.Errorf("cannot write %s: %w\nhint: the key is locked at a higher rung (or conflicts with an existing row); see `orun secrets list --chain --env <env>`", key, err)
 		case apiErr.IsNotFound():
-			return fmt.Errorf("cannot write %s: %w\nhint: the scope was not found or you lack access; check `orun cloud status`", key, err)
+			// Resource-hiding masks authorization as not_found. The "scope
+			// missing" reading is usually WRONG and cost a live bootstrap a
+			// half-hour of misdiagnosis: when reads on the same scope work
+			// (listing succeeded moments before), the credential's ROLE is
+			// below the write floor — secret writes need an ADMIN-role key.
+			return fmt.Errorf("cannot write %s: %w\nhint: not_found on a WRITE usually means the credential lacks write access (denials are hidden as not_found). If reads on this scope work, the API key's role is below ADMIN — re-mint it with the admin role. A genuinely missing scope would also fail reads: `orun secrets list --org <ws> --project`", key, err)
 		}
 	}
 	return err
