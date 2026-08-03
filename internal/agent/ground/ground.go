@@ -148,7 +148,32 @@ func Ground(ctx context.Context, cfg *Config, opts Options) (string, error) {
 		logf(opts.Log, "orun agent serve: grounding — cloning %s (blobless) at %s into %s\n",
 			redactCredentials(cfg.Remote), refOrDefault(cfg.Ref), dir)
 		if _, err := runGit(ctx, "", args...); err != nil {
-			return "", stageErr(StageClone, err)
+			// A zero-commit repository has no refs, so `--branch <ref>` cannot
+			// match — and a fresh product repo is the blueprint bootstrap's
+			// normal starting point ("an empty repo is ideal"). Confirm the
+			// remote really is refless before rerouting; any other clone
+			// failure keeps its original error.
+			if cfg.Ref == "" || !remoteIsEmpty(ctx, cfg.Remote, opts.CredentialHelper) {
+				return "", stageErr(StageClone, err)
+			}
+			logf(opts.Log, "orun agent serve: grounding — %s is an empty repository, cloning refless and starting %s unborn\n",
+				redactCredentials(cfg.Remote), cfg.Ref)
+			// git removes the clone target on failure; clear defensively in
+			// case a partial dir survived, then clone without the ref pin.
+			_ = os.RemoveAll(dir)
+			args = []string{"clone", "--filter=blob:none"}
+			if opts.CredentialHelper != "" {
+				args = append(args, "--config", "credential.helper="+opts.CredentialHelper)
+			}
+			args = append(args, cfg.Remote, dir)
+			if _, err := runGit(ctx, "", args...); err != nil {
+				return "", stageErr(StageClone, err)
+			}
+			// Aim the unborn HEAD at the bound ref so the very first commit is
+			// born on the branch the platform expects to see pushed.
+			if _, err := runGit(ctx, dir, "symbolic-ref", "HEAD", "refs/heads/"+cfg.Ref); err != nil {
+				return "", stageErr(StageClone, err)
+			}
 		}
 	}
 
@@ -163,7 +188,10 @@ func Ground(ctx context.Context, cfg *Config, opts Options) (string, error) {
 			logf(opts.Log, "orun agent serve: grounding — task branch %s exists, reused\n", opts.Branch)
 		} else {
 			args := []string{"checkout", "-b", opts.Branch}
-			if cfg.Ref != "" {
+			// The start point must resolve locally; on an empty remote the
+			// bound ref is an unborn HEAD, and the task branch starts unborn
+			// from it. (A bad ref on a real repo already failed the clone.)
+			if cfg.Ref != "" && refResolves(ctx, dir, cfg.Ref) {
 				args = append(args, cfg.Ref)
 			}
 			if _, err := runGit(ctx, dir, args...); err != nil {
@@ -210,6 +238,26 @@ func classifyWorkdir(ctx context.Context, dir, remote string) (resume bool, err 
 func branchExists(ctx context.Context, dir, branch string) bool {
 	_, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	return err == nil
+}
+
+// refResolves reports whether the ref names a commit in the local clone.
+func refResolves(ctx context.Context, dir, ref string) bool {
+	_, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// remoteIsEmpty reports whether the remote has no refs at all — a freshly
+// created repository. The listing rides the same credential helper as the
+// clone; any listing failure reads as NOT empty, so the clone's own error
+// stays the one reported.
+func remoteIsEmpty(ctx context.Context, remote, credentialHelper string) bool {
+	var args []string
+	if credentialHelper != "" {
+		args = append(args, "-c", "credential.helper="+credentialHelper)
+	}
+	args = append(args, "ls-remote", "--heads", "--tags", remote)
+	out, err := runGit(ctx, "", args...)
+	return err == nil && strings.TrimSpace(out) == ""
 }
 
 // runGit runs `git -C <dir> <args…>` (plain `git <args…>` when dir is empty —

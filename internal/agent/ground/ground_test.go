@@ -316,3 +316,53 @@ func assertStage(t *testing.T, err error, stage string) {
 		t.Errorf("error %q lacks the terminal marker", err.Error())
 	}
 }
+
+// newEmptyRemote builds a bare repo with no commits at all — the shape of a
+// product repo the instant GitHub creates it, and the blueprint bootstrap's
+// normal starting point ("an empty repo is ideal").
+func newEmptyRemote(t *testing.T) string {
+	t.Helper()
+	requireGit(t)
+	bare := filepath.Join(t.TempDir(), "empty.git")
+	mustGit(t, "", "init", "--quiet", "--bare", "--initial-branch=main", bare)
+	return bare
+}
+
+func TestGroundEmptyRemoteStartsUnbornAtRef(t *testing.T) {
+	// A zero-commit remote has no refs for `--branch` to match; grounding must
+	// still come up, with HEAD unborn at the bound ref so the first commit is
+	// born on the branch the platform expects pushed. (Observed live: the
+	// blueprint bootstrap on a fresh repo died at clone and the session hung
+	// at "Agent coming online".)
+	remote := newEmptyRemote(t)
+	cfg := &Config{Remote: remote, FullName: "acme/newborn", Ref: "main"}
+	dir, err := Ground(context.Background(), cfg, Options{WorkdirRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Ground on an empty remote: %v", err)
+	}
+	if head := mustGit(t, dir, "symbolic-ref", "HEAD"); head != "refs/heads/main" {
+		t.Errorf("HEAD = %q, want refs/heads/main (unborn)", head)
+	}
+	// The workflow's first commit + push must land on main upstream.
+	mustGit(t, dir, "config", "user.email", "test@example.com")
+	mustGit(t, dir, "config", "user.name", "Test")
+	mustGit(t, dir, "commit", "--quiet", "--allow-empty", "-m", "first")
+	mustGit(t, dir, "push", "--quiet", "origin", "main")
+	if got := mustGit(t, "", "-C", remote, "rev-parse", "--abbrev-ref", "HEAD"); got != "main" {
+		t.Errorf("remote HEAD = %q, want main", got)
+	}
+}
+
+func TestGroundEmptyRemoteCreatesUnbornTaskBranch(t *testing.T) {
+	// Task runs carry a branch; on unborn history it starts unborn too rather
+	// than failing on a start point that cannot resolve.
+	remote := newEmptyRemote(t)
+	cfg := &Config{Remote: remote, FullName: "acme/newborn", Ref: "main"}
+	dir, err := Ground(context.Background(), cfg, Options{Branch: "agent/ORN-9-implementer", WorkdirRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Ground: %v", err)
+	}
+	if head := mustGit(t, dir, "symbolic-ref", "HEAD"); head != "refs/heads/agent/ORN-9-implementer" {
+		t.Errorf("HEAD = %q, want the unborn task branch", head)
+	}
+}
