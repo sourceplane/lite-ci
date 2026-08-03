@@ -26,9 +26,9 @@ const (
 	compositionPackageLayerType    = "application/vnd.sourceplane.orun.composition.package.layer.v1.tar+gzip"
 
 	// Stack OCI media types (orun.io/v1 / kind: Stack format).
-	stackArtifactType            = "application/vnd.orun.stack.v1"
-	compositionsLayerMediaType   = "application/vnd.orun.stack.compositions.layer.v1+tar+gzip"
-	examplesLayerMediaType       = "application/vnd.orun.stack.examples.layer.v1+tar+gzip"
+	stackArtifactType          = "application/vnd.orun.stack.v1"
+	compositionsLayerMediaType = "application/vnd.orun.stack.compositions.layer.v1+tar+gzip"
+	examplesLayerMediaType     = "application/vnd.orun.stack.examples.layer.v1+tar+gzip"
 )
 
 // BuildPackageArchive validates a composition package directory and writes a .tgz archive to disk.

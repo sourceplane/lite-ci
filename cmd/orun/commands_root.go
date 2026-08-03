@@ -255,6 +255,18 @@ func init() {
 	registerAuthCommand(rootCmd)
 	registerCloudCommand(rootCmd)
 	registerWorkspaceCommand(rootCmd)
+	// `orun version` — the spelling every other CLI accepts. Muscle memory
+	// (and agent runbooks) type it constantly; erroring with "unknown
+	// command" reads as a broken install (hit live: an operator reinstalled
+	// a perfectly good binary over it).
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print the orun version (same as --version)",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("%s version %s\n", cliName, version)
+		},
+	})
 	registerBackendCommand(rootCmd)
 	registerValidateCommand(rootCmd)
 	registerDebugCommand(rootCmd)

@@ -82,6 +82,18 @@ func runAuthStatus() error {
 	creds, err := cliauth.LoadSession()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// Headless runs authenticate from the environment, not a stored
+			// session — reporting "not logged in" with ORUN_TOKEN set sends
+			// operators chasing a non-existent auth problem (hit live).
+			if strings.TrimSpace(os.Getenv("ORUN_TOKEN")) != "" {
+				color := ui.ColorEnabledForWriter(os.Stdout)
+				fmt.Printf("%s headless: authenticated via ORUN_TOKEN (no stored session)\n", ui.Green(color, "✓"))
+				if backendURL != "" {
+					fmt.Printf("Backend URL: %s\n", backendURL)
+				}
+				fmt.Println("Resolve a workspace's identity with `orun workspace <ws-id-or-slug>`.")
+				return nil
+			}
 			return fmt.Errorf("not logged in; run `orun auth login` or `orun auth login --device`")
 		}
 		return err

@@ -138,6 +138,12 @@ func cloudSessionToken(ctx context.Context, backendURL string) (string, error) {
 }
 
 func errNotLoggedIn() error {
+	// With ORUN_TOKEN set, "set ORUN_TOKEN" is insulting noise: this path is
+	// then reached because the operation needs something the token cannot
+	// provide (e.g. a memberships list — workspace-scoped keys have none).
+	if strings.TrimSpace(os.Getenv("ORUN_TOKEN")) != "" {
+		return fmt.Errorf("ORUN_TOKEN is set, but this operation needs a stored session or a membership listing the token does not have (workspace-scoped keys list no memberships — resolve identity with `orun workspace <ws-id-or-slug>` instead)")
+	}
 	return fmt.Errorf("not logged in to Orun Cloud; run `orun auth login` (or set ORUN_TOKEN for headless runs)")
 }
 

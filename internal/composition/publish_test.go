@@ -78,12 +78,12 @@ func TestSanitizeTag(t *testing.T) {
 
 func TestNormalizeOCIRef(t *testing.T) {
 	cases := map[string]string{
-		"sourceplane/devops-compositions":   "ghcr.io/sourceplane/devops-compositions:latest",
-		"ghcr.io/acme/aws-vpc":              "ghcr.io/acme/aws-vpc:latest",
-		"ghcr.io/acme/aws-vpc:v1":           "ghcr.io/acme/aws-vpc:v1",
-		"oci://ghcr.io/acme/aws-vpc:v1":     "ghcr.io/acme/aws-vpc:v1",
-		"localhost:5000/acme/x:dev":         "localhost:5000/acme/x:dev",
-		"":                                  "",
+		"sourceplane/devops-compositions": "ghcr.io/sourceplane/devops-compositions:latest",
+		"ghcr.io/acme/aws-vpc":            "ghcr.io/acme/aws-vpc:latest",
+		"ghcr.io/acme/aws-vpc:v1":         "ghcr.io/acme/aws-vpc:v1",
+		"oci://ghcr.io/acme/aws-vpc:v1":   "ghcr.io/acme/aws-vpc:v1",
+		"localhost:5000/acme/x:dev":       "localhost:5000/acme/x:dev",
+		"":                                "",
 	}
 	for in, want := range cases {
 		if got := NormalizeOCIRef(in); got != want {
