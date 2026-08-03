@@ -233,3 +233,30 @@ custom persona
 		t.Fatalf("authored file must win over the embedded copy, got model %q", d.Model)
 	}
 }
+
+func TestLoadNamedShippedBootstrapper(t *testing.T) {
+	// The blueprint-bootstrap type: unattended by design. Shell and edits ride
+	// the allow lane (the sandbox is the isolation boundary); Task stays
+	// denied — a bootstrap is one conversation, not a fleet.
+	t.Chdir(t.TempDir())
+
+	d, issues := LoadNamed("bootstrapper")
+	if d == nil {
+		t.Fatalf("shipped bootstrapper must load from the embedded FS: %v", issues)
+	}
+	if d.AutonomyDefault != "full" {
+		t.Fatalf("autonomyDefault = %q, want full (unattended)", d.AutonomyDefault)
+	}
+	allow := make(map[string]bool)
+	for _, a := range d.Tools.Allow {
+		allow[a] = true
+	}
+	for _, must := range []string{"Bash", "Edit", "Write", "Read", "TodoWrite"} {
+		if !allow[must] {
+			t.Errorf("%s missing from the allow lane — the build would stall on approvals", must)
+		}
+	}
+	if len(d.Tools.Deny) == 0 || d.Tools.Deny[len(d.Tools.Deny)-1] != "*" {
+		t.Errorf("deny lane must backstop with %q: %v", "*", d.Tools.Deny)
+	}
+}
