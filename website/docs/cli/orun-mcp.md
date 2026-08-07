@@ -7,12 +7,13 @@ title: orun mcp
 dependency-free JSON-RPC 2.0 server over stdio that gives an agent hands on
 everything orun through a single connection.
 
-One loop composes two tool planes — **40 tools under one initialize**:
+One loop composes two tool planes — **46 tools under one initialize**:
 
-- **The work plane** (15 tools) — orun's delivery-derived work tracker and
-  its planning hierarchy: tasks with *derived* lifecycle and evidence,
-  sealed spec and epic briefs, initiative/design/milestone reads,
-  mutator-only writes. Mounted when a workspace scope resolves.
+- **The work plane** (21 tools) — orun's delivery-derived work tracker and
+  its planning hierarchy: the initiatives portfolio and tree, tasks with
+  *derived* lifecycle and evidence, sealed spec and epic briefs,
+  initiative/design/milestone reads, mutator-only writes. Mounted when a
+  workspace scope resolves.
 - **The platform plane** (25 tools) — the Orun Cloud public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
   metadata, webhooks. 19 reads plus 6 policy-gated writes. Mounted whenever
@@ -90,7 +91,7 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 | --- | --- |
 | `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Mounts the work plane and becomes the platform tools' default `workspace`. |
 | `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted). |
-| `--read-only` | Drop the 6 platform write tools from the roster (34 tools instead of 40). Filtered from `tools/list` *and* blocked at execution. |
+| `--read-only` | Drop the 6 platform write tools from the roster (40 tools instead of 46). Filtered from `tools/list` *and* blocked at execution. |
 
 `--read-only` deliberately does **not** touch the work plane's write tools:
 they are mutator-shaped by design (one audited mutator surface for UI, MCP,
@@ -108,10 +109,14 @@ orun mcp tools --json        # the same rows as JSON
 orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 ```
 
-## The work plane (15 tools)
+## The work plane (21 tools)
 
 | Tool | Kind | Purpose |
 | --- | --- | --- |
+| `initiatives_list` | read | The portfolio: every initiative with derived status, progress, needs-you reasons, agent assignees, epic and design rows |
+| `initiative_tree` | read | One initiative's full hierarchy: epics with intent, milestones with derived state, tasks with rungs and evidence, docs, designs |
+| `task_get` | read | One task's whole page: rung with evidence, ancestry, delivery evidence, components affected, activity tail |
+| `activity_get` | read | The tagged activity tail for any noun — both logs folded, ancestry-scoped, cursor-paged |
 | `work_query` | read | The fold summary — every task's derived rung WITH its evidence |
 | `work_get` | read | One task in full (contract, lifecycle, evidence, pins) |
 | `work_timeline` | read | One item's unified timeline: coordination and observation logs interleaved by time, evidence attached |
@@ -127,8 +132,10 @@ orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 | `contract_propose` | write | Edit a task contract — applied AND flagged with a review comment |
 | `design_propose` | write | Create a Draft design under an initiative (doc ref + structured proposal) — a *proposal*; humans review, compare, adopt |
 | `task_regenerate` | write | Re-plan one milestone in one verdict batch: planned tasks cancel, in-flight tasks survive, every contract flagged for review |
+| `initiative_create` | write | Create an initiative envelope (slug, title, why) — agents may draft it; the why stays human-edited |
+| `milestone_upsert` | write | One ladder edit (create/edit/reorder/remove) on an epic's milestones — authored intent; progress stays derived |
 
-Four properties are structural, not policy:
+Five properties are structural, not policy:
 
 - **No `task_update_status` exists.** Lifecycle derives from delivery facts;
   an agent moves a task to In Review by *opening a PR*, not by calling a tool.
@@ -144,6 +151,10 @@ Four properties are structural, not policy:
   applied through the normal mutator *and* flagged for human review in the
   same call — an agent cannot silently redefine its own definition of done,
   or its own plan.
+- **Decision refusals are typed.** When a write brushes a human-only
+  decision, the cloud answers with its typed `human_only` verdict and the
+  MCP surfaces it verbatim — so a model can tell "not allowed for you"
+  from "does not exist".
 
 ## The platform plane (25 tools)
 
@@ -235,7 +246,7 @@ from `orun-work` when the surface unified).
 
 ## Related
 
-- [`orun work`](./orun-work.md) — the same work fold in the terminal
+- [`orun initiatives`](./orun-initiatives.md) — the same work fold in the terminal
 - [`orun spec`](./orun-spec.md) — sealed briefs (`spec_get`'s CLI twin)
 - [`orun auth`](./orun-auth.md) / [`orun cloud`](./orun-cloud.md) — the
   session and repo link the server mounts from

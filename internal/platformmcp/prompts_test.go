@@ -98,7 +98,7 @@ func TestPromptBranches(t *testing.T) {
 
 // TestPromptToolDriftGuard ports the TS plane's guard: every snake_case
 // token in rendered prompt text must be a tool on the composed roster (work
-// + platform + built-in — the 41 tools one serve advertises), so a tool
+// + platform + built-in — the 47 tools one serve advertises), so a tool
 // rename breaks this test instead of silently orphaning a prompt.
 func TestPromptToolDriftGuard(t *testing.T) {
 	roster := map[string]bool{}
@@ -111,8 +111,8 @@ func TestPromptToolDriftGuard(t *testing.T) {
 	for _, tool := range (&mcpserve.ConnectionInfoProvider{}).Tools() {
 		roster[tool.Name] = true
 	}
-	if len(roster) != 41 {
-		t.Fatalf("composed roster = %d tools, want 41 (15 work + 25 platform + 1 built-in)", len(roster))
+	if len(roster) != 47 {
+		t.Fatalf("composed roster = %d tools, want 47 (21 work + 25 platform + 1 built-in)", len(roster))
 	}
 
 	tokenPattern := regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)

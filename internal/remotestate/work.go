@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 // Work-plane client (orun-work v2 WP1) — the CLI's seam onto the cloud work
@@ -121,12 +123,31 @@ type WorkSpecView struct {
 	Progress  map[string]int `json:"progress"`
 }
 
+// WorkInitiativeView mirrors the platform's WorkInitiativeView: the
+// envelope plus the DERIVED health/progress projections (v3 PM3/v4 —
+// nothing here is a number anyone types).
+type WorkInitiativeView struct {
+	Key             string         `json:"key"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description,omitempty"`
+	Owner           string         `json:"owner,omitempty"`
+	TargetDate      string         `json:"targetDate,omitempty"`
+	SuccessCriteria []string       `json:"successCriteria,omitempty"`
+	Health          string         `json:"health,omitempty"`
+	HealthEvidence  []string       `json:"healthEvidence,omitempty"`
+	CreatedBy       WorkActor      `json:"createdBy"`
+	CreatedAt       string         `json:"createdAt,omitempty"`
+	Specs           []string       `json:"specs,omitempty"`
+	Progress        map[string]int `json:"progress,omitempty"`
+}
+
 // WorkSummary is the workspace lens: everything derives from the two logs.
 type WorkSummary struct {
-	Specs    []WorkSpecView `json:"specs"`
-	Tasks    []WorkTaskView `json:"tasks"`
-	CoordSeq int64          `json:"coordSeq"`
-	ObsSeq   int64          `json:"obsSeq"`
+	Specs       []WorkSpecView       `json:"specs"`
+	Tasks       []WorkTaskView       `json:"tasks"`
+	Initiatives []WorkInitiativeView `json:"initiatives,omitempty"`
+	CoordSeq    int64                `json:"coordSeq"`
+	ObsSeq      int64                `json:"obsSeq"`
 }
 
 // workPath builds an org-scoped work path (no project segment — the work
@@ -447,6 +468,365 @@ func (c *Client) GetWorkDoc(ctx context.Context, specKey, rev string) (*WorkDoc,
 	}
 	var resp WorkDoc
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── orun-initiatives (IN1–IN2) — the four derived reads the Initiatives
+// surface renders: portfolio, tree, task detail, tagged activity. Wire
+// shapes mirror @saas/contracts/work (the field-level truth); everything
+// here is a fold over the two logs — nothing is stored, nothing writable.
+
+// WorkFoldStats is the portfolio header's figures. AgentsLive is optional
+// on the wire — the work plane does not own sessions.
+type WorkFoldStats struct {
+	OpenTasks  int `json:"openTasks"`
+	NeedsYou   int `json:"needsYou"`
+	AgentsLive int `json:"agentsLive,omitempty"`
+}
+
+// WorkNeedsYouReason is one reason an initiative waits on a human — always
+// with the item key it points at and a short server sentence.
+type WorkNeedsYouReason struct {
+	Kind    string `json:"kind"` // approval_drifted | awaiting_approval | review_open | milestone_idle | design_in_review
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
+}
+
+// WorkProgressView is the two-segment meter arithmetic: done = Done+Released,
+// active = In Progress+In Review, total = all non-canceled member tasks.
+type WorkProgressView struct {
+	Done   int `json:"done"`
+	Active int `json:"active"`
+	Total  int `json:"total"`
+}
+
+// WorkApprovalView mirrors the platform's approval record on an epic intent.
+type WorkApprovalView struct {
+	Revision   string    `json:"revision,omitempty"`
+	Snapshot   string    `json:"snapshot,omitempty"`
+	By         WorkActor `json:"by"`
+	At         string    `json:"at,omitempty"`
+	LadderHash string    `json:"ladderHash,omitempty"`
+}
+
+// WorkEpicIntentView is the folded intent ladder: state plus the approval
+// record and drift flags (approved never renders without its revision).
+type WorkEpicIntentView struct {
+	State           string            `json:"state"`
+	Approval        *WorkApprovalView `json:"approval,omitempty"`
+	CurrentRevision string            `json:"currentRevision,omitempty"`
+	DocDrifted      bool              `json:"docDrifted,omitempty"`
+	LadderDrifted   bool              `json:"ladderDrifted,omitempty"`
+}
+
+// WorkPortfolioEpicRow is one epic row inside a portfolio initiative.
+type WorkPortfolioEpicRow struct {
+	Key            string             `json:"key"`
+	Title          string             `json:"title"`
+	Intent         WorkEpicIntentView `json:"intent"`
+	Progress       WorkProgressView   `json:"progress"`
+	ProposedBy     string             `json:"proposedBy,omitempty"`
+	AgentAssignees []string           `json:"agentAssignees"`
+}
+
+// WorkPortfolioDesignRow is one initiative-level design run in the portfolio.
+type WorkPortfolioDesignRow struct {
+	Key                string `json:"key"`
+	Title              string `json:"title"`
+	State              string `json:"state"` // draft | in_review | adopted | superseded
+	ProposedEpics      int    `json:"proposedEpics"`
+	ProposedMilestones int    `json:"proposedMilestones"`
+}
+
+// WorkPortfolioInitiativeRow is one initiative in the portfolio fold.
+type WorkPortfolioInitiativeRow struct {
+	Key            string                   `json:"key"`
+	Title          string                   `json:"title"`
+	Status         string                   `json:"status"` // planning | on_track | at_risk | off_track
+	HealthEvidence []string                 `json:"healthEvidence,omitempty"`
+	Owner          string                   `json:"owner,omitempty"`
+	TargetDate     string                   `json:"targetDate,omitempty"`
+	EpicCount      int                      `json:"epicCount"`
+	Progress       WorkProgressView         `json:"progress"`
+	NeedsYou       []WorkNeedsYouReason     `json:"needsYou"`
+	AgentAssignees []string                 `json:"agentAssignees"`
+	Epics          []WorkPortfolioEpicRow   `json:"epics"`
+	Designs        []WorkPortfolioDesignRow `json:"designs"`
+}
+
+// WorkPortfolio is the Initiatives home in one read (WorkPortfolioResponse).
+type WorkPortfolio struct {
+	Stats       WorkFoldStats                `json:"stats"`
+	Initiatives []WorkPortfolioInitiativeRow `json:"initiatives"`
+	CoordSeq    int64                        `json:"coordSeq"`
+	ObsSeq      int64                        `json:"obsSeq"`
+}
+
+// ListInitiatives fetches the portfolio: fold-stats plus one row per
+// initiative with progress, needs-you reasons, epic and design rows.
+func (c *Client) ListInitiatives(ctx context.Context) (*WorkPortfolio, error) {
+	var resp WorkPortfolio
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/initiatives"), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkTaskEvidenceView is the task-rail evidence fold: branch_seen → branch,
+// pr_* → pr, gate_result → checks. Fields absent when the logs are silent —
+// evidence is never invented.
+type WorkTaskEvidenceView struct {
+	Branch *WorkEvidenceBranch `json:"branch,omitempty"`
+	PR     *WorkEvidencePR     `json:"pr,omitempty"`
+	Checks *WorkEvidenceChecks `json:"checks,omitempty"`
+}
+
+// WorkEvidenceBranch is the branch leg of the evidence fold.
+type WorkEvidenceBranch struct {
+	Name       string `json:"name"`
+	LastPushAt string `json:"lastPushAt,omitempty"`
+}
+
+// WorkEvidencePR is the pull-request leg of the evidence fold.
+type WorkEvidencePR struct {
+	Number       string `json:"number"`
+	Merged       bool   `json:"merged"`
+	MergedAt     string `json:"mergedAt,omitempty"`
+	ChecksPassed int    `json:"checksPassed,omitempty"`
+	ChecksTotal  int    `json:"checksTotal,omitempty"`
+}
+
+// WorkEvidenceChecks is the gate_result leg of the evidence fold.
+type WorkEvidenceChecks struct {
+	Passed int    `json:"passed"`
+	Total  int    `json:"total"`
+	At     string `json:"at,omitempty"`
+}
+
+// WorkTreeTaskRow is one task row in the initiative tree.
+type WorkTreeTaskRow struct {
+	Key      string               `json:"key"`
+	Title    string               `json:"title"`
+	Rung     string               `json:"rung"`
+	Assignee *WorkActor           `json:"assignee,omitempty"`
+	Evidence WorkTaskEvidenceView `json:"evidence"`
+	LandedAt string               `json:"landedAt,omitempty"`
+}
+
+// WorkTreeMilestone is one ladder milestone with its derived state
+// (complete | active | upcoming — pure ladder arithmetic) and member tasks.
+type WorkTreeMilestone struct {
+	Key      string            `json:"key"`
+	Title    string            `json:"title"`
+	Goal     string            `json:"goal,omitempty"`
+	DoneWhen []string          `json:"doneWhen,omitempty"`
+	State    string            `json:"state"`
+	Progress WorkProgressView  `json:"progress"`
+	Tasks    []WorkTreeTaskRow `json:"tasks"`
+}
+
+// WorkTreeDocRow is one document row (epic spec or design doc) in the tree.
+type WorkTreeDocRow struct {
+	Subject  string     `json:"subject"`
+	Kind     string     `json:"kind"` // spec | design
+	Title    string     `json:"title"`
+	Revision string     `json:"revision,omitempty"`
+	State    string     `json:"state"` // approved | drifted | adopted | archived | draft
+	Author   *WorkActor `json:"author,omitempty"`
+	Threads  *struct {
+		Total int `json:"total"`
+		Open  int `json:"open"`
+	} `json:"threads,omitempty"`
+}
+
+// WorkTreeEpic is one epic subtree: intent, milestones, backlog, docs.
+type WorkTreeEpic struct {
+	Key         string              `json:"key"`
+	Title       string              `json:"title"`
+	Description string              `json:"description,omitempty"`
+	Intent      WorkEpicIntentView  `json:"intent"`
+	Owner       string              `json:"owner,omitempty"`
+	TargetDate  string              `json:"targetDate,omitempty"`
+	Progress    WorkProgressView    `json:"progress"`
+	Milestones  []WorkTreeMilestone `json:"milestones"`
+	Backlog     []WorkTreeTaskRow   `json:"backlog"`
+	Docs        []WorkTreeDocRow    `json:"docs"`
+}
+
+// WorkTreeInitiative is the tree's initiative header: the initiative view
+// plus the portfolio's status/needs-you/progress folds.
+type WorkTreeInitiative struct {
+	WorkInitiativeView
+	Status       string               `json:"status"`
+	NeedsYou     []WorkNeedsYouReason `json:"needsYou"`
+	ProgressView WorkProgressView     `json:"progressView"`
+}
+
+// WorkInitiativeTree is one initiative's whole world
+// (WorkInitiativeTreeResponse): the epic page and the home expansion.
+type WorkInitiativeTree struct {
+	Initiative WorkTreeInitiative `json:"initiative"`
+	Epics      []WorkTreeEpic     `json:"epics"`
+	Designs    []WorkDesignView   `json:"designs"`
+}
+
+// GetInitiativeTree fetches one initiative's full hierarchy: epics with
+// intent, milestones with derived state, tasks with rungs and evidence,
+// docs, and the initiative-scoped design runs. 404 (never 403) on
+// cross-tenant or missing.
+func (c *Client) GetInitiativeTree(ctx context.Context, key string) (*WorkInitiativeTree, error) {
+	var resp WorkInitiativeTree
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/initiatives/"+urlSegment(key)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkItemRef names an ancestor item (initiative/epic/milestone) on a task.
+type WorkItemRef struct {
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
+
+// WorkComponentTouched is a diffstat carried by an observation payload;
+// empty when the world never reported one — never invented.
+type WorkComponentTouched struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+}
+
+// WorkActivityEntry is one entry of the folded two-log tail. Actor is
+// absent for observations — the world acted, not an actor.
+type WorkActivityEntry struct {
+	At      string     `json:"at"`
+	Source  string     `json:"source"` // coordination | observation
+	Kind    string     `json:"kind"`
+	Subject string     `json:"subject"`
+	Tag     string     `json:"tag"`
+	Actor   *WorkActor `json:"actor,omitempty"`
+	Text    string     `json:"text"`
+}
+
+// WorkTaskDetail is one task's whole page (WorkTaskDetailResponse): the
+// task view, its ancestry, evidence, components touched, and activity tail.
+type WorkTaskDetail struct {
+	Task               WorkTaskView           `json:"task"`
+	Initiative         *WorkItemRef           `json:"initiative,omitempty"`
+	Epic               *WorkItemRef           `json:"epic,omitempty"`
+	Milestone          *WorkItemRef           `json:"milestone,omitempty"`
+	Evidence           WorkTaskEvidenceView   `json:"evidence"`
+	ComponentsAffected []WorkComponentTouched `json:"componentsAffected"`
+	Activity           []WorkActivityEntry    `json:"activity"`
+}
+
+// GetTaskDetail fetches one task's detail: rung with evidence, ancestry,
+// components affected, and the task-scoped activity tail (newest first).
+func (c *Client) GetTaskDetail(ctx context.Context, key string) (*WorkTaskDetail, error) {
+	var resp WorkTaskDetail
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/tasks/"+urlSegment(key)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkActivityOptions filters the tagged activity tail. Empty fields are
+// omitted. Tag ancestry is server-side: filtering by an epic covers its
+// milestones' tasks, docs, and designs; an initiative covers its subtree.
+type WorkActivityOptions struct {
+	Tag    string
+	Limit  int
+	Cursor string
+}
+
+// WorkActivity is the reverse-chronological tail (WorkActivityResponse).
+type WorkActivity struct {
+	Entries    []WorkActivityEntry `json:"entries"`
+	NextCursor string              `json:"nextCursor,omitempty"`
+}
+
+// GetWorkActivity fetches the tagged activity tail: both logs folded into
+// one reverse-chronological list of neutral server sentences.
+func (c *Client) GetWorkActivity(ctx context.Context, opts WorkActivityOptions) (*WorkActivity, error) {
+	q := url.Values{}
+	if opts.Tag != "" {
+		q.Set("tag", opts.Tag)
+	}
+	if opts.Limit > 0 {
+		q.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	if opts.Cursor != "" {
+		q.Set("cursor", opts.Cursor)
+	}
+	path := c.workPath("/activity")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp WorkActivity
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateWorkInitiativeRequest mirrors the platform's
+// CreateWorkInitiativeRequest — the strategic envelope. No lifecycle, no
+// contract: an initiative has nothing to cancel and nothing to fold.
+type CreateWorkInitiativeRequest struct {
+	Slug            string   `json:"slug"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description,omitempty"`
+	Owner           string   `json:"owner,omitempty"`
+	TargetDate      string   `json:"targetDate,omitempty"`
+	SuccessCriteria []string `json:"successCriteria,omitempty"`
+}
+
+// CreateInitiative creates an initiative envelope through the one mutator
+// surface (POST /work/initiatives).
+func (c *Client) CreateInitiative(ctx context.Context, req CreateWorkInitiativeRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkDesigns is one initiative's design runs (WorkDesignsResponse).
+type WorkDesigns struct {
+	Designs []WorkDesignView `json:"designs"`
+}
+
+// ListWorkDesigns fetches an initiative's design runs.
+func (c *Client) ListWorkDesigns(ctx context.Context, initiativeKey string) (*WorkDesigns, error) {
+	var resp WorkDesigns
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/initiatives/"+urlSegment(initiativeKey)+"/designs"), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkMilestoneRequest mirrors the platform's WorkMilestoneRequest: one
+// ladder edit (create/edit/reorder/remove) — authored intent only; per-
+// milestone progress stays derived (V4-4). Ordinal is a pointer so a
+// reorder to position 0 survives the wire.
+type WorkMilestoneRequest struct {
+	Op         string   `json:"op"` // create | edit | reorder | remove
+	Key        string   `json:"key"`
+	Title      string   `json:"title,omitempty"`
+	Goal       string   `json:"goal,omitempty"`
+	DoneWhen   []string `json:"doneWhen,omitempty"`
+	TargetDate string   `json:"targetDate,omitempty"`
+	Ordinal    *int     `json:"ordinal,omitempty"`
+}
+
+// UpsertMilestones applies one ladder edit to an epic's milestone ladder
+// through the one mutator (POST /work/epics/{epic}/milestones).
+func (c *Client) UpsertMilestones(ctx context.Context, epicKey string, req WorkMilestoneRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(epicKey)+"/milestones"), req, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil

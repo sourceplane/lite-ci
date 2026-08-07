@@ -457,7 +457,7 @@ func TestConfigScopeValidation(t *testing.T) {
 	}
 }
 
-// TestComposedServer: 34 tools (9 work + 25 platform) under one initialize,
+// TestComposedServer: 46 tools (21 work + 25 platform) under one initialize,
 // calls routed to the owning provider, and the WP-3/WP-10 forbidden-name
 // sweep green over the merged roster.
 func TestComposedServer(t *testing.T) {
@@ -516,8 +516,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 40 {
-		t.Fatalf("merged roster = %d tools, want 40 (15 work + 25 platform — WH5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 46 {
+		t.Fatalf("merged roster = %d tools, want 46 (21 work + 25 platform — IN5)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -546,9 +546,9 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (34 → 28); the 9 work tools stay — they are mutator-shaped by WP-6,
-// not read-only-filtered (risk U-R3) — and a filtered write is blocked at
-// execution too, not just delisted.
+// writes (46 → 40); the 21 work tools stay — they are mutator-shaped by
+// WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
+// blocked at execution too, not just delisted.
 func TestComposedServerReadOnly(t *testing.T) {
 	api := &fakeAPI{page: page(`{}`, "")}
 	work := &workmcp.Server{API: workFake{}, Workspace: "ws_1"}
@@ -574,23 +574,24 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 34 {
-		t.Fatalf("read-only roster = %d tools, want 34 (15 work + 19 platform reads — WH5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 40 {
+		t.Fatalf("read-only roster = %d tools, want 40 (21 work + 19 platform reads — IN5)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
 		if strings.HasPrefix(tool.Name, "work_") || strings.HasPrefix(tool.Name, "spec_") ||
 			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") ||
 			strings.HasPrefix(tool.Name, "epic_") || strings.HasPrefix(tool.Name, "design_") ||
-			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") {
+			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") ||
+			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") {
 			workCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 15 {
-		t.Errorf("work tools under --read-only = %d, want 15 (mutator-shaped, unaffected — WH5)", workCount)
+	if workCount != 21 {
+		t.Errorf("work tools under --read-only = %d, want 21 (mutator-shaped, unaffected — IN5)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -641,4 +642,24 @@ func (workFake) CreateWorkDesign(context.Context, string, remotestate.CreateWork
 }
 func (workFake) RegenerateWorkTasks(context.Context, string, string, remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error) {
 	return &remotestate.RegenerateWorkTasksResponse{}, nil
+}
+func (workFake) ListInitiatives(context.Context) (*remotestate.WorkPortfolio, error) {
+	return &remotestate.WorkPortfolio{}, nil
+}
+func (workFake) GetInitiativeTree(_ context.Context, key string) (*remotestate.WorkInitiativeTree, error) {
+	tree := &remotestate.WorkInitiativeTree{}
+	tree.Initiative.Key = key
+	return tree, nil
+}
+func (workFake) GetTaskDetail(_ context.Context, key string) (*remotestate.WorkTaskDetail, error) {
+	return &remotestate.WorkTaskDetail{Task: remotestate.WorkTaskView{Key: key}}, nil
+}
+func (workFake) GetWorkActivity(context.Context, remotestate.WorkActivityOptions) (*remotestate.WorkActivity, error) {
+	return &remotestate.WorkActivity{}, nil
+}
+func (workFake) CreateInitiative(_ context.Context, req remotestate.CreateWorkInitiativeRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: req.Slug}, nil
+}
+func (workFake) UpsertMilestones(_ context.Context, epicKey string, _ remotestate.WorkMilestoneRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: epicKey}, nil
 }

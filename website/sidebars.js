@@ -110,7 +110,7 @@ const sidebars = {
         'cli/orun-secrets',
         'cli/orun-integrations',
         'cli/orun-policy',
-        'cli/orun-work',
+        'cli/orun-initiatives',
         'cli/orun-spec',
         'cli/orun-epic',
         'cli/orun-mcp',

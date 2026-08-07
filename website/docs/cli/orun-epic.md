@@ -65,5 +65,5 @@ canonicalization drift can exist.
 ## Related
 
 - [`orun spec`](./orun-spec.md) — the v2 spec brief this generalizes
-- [`orun work`](./orun-work.md) — import and inspect the hierarchy
+- [`orun initiatives`](./orun-initiatives.md) — import and inspect the hierarchy
 - [`orun mcp`](./orun-mcp.md) — `epic_brief` serves the same sealed bytes

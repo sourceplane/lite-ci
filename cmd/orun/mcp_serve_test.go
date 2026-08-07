@@ -83,7 +83,7 @@ func TestDegradedServeAssembly(t *testing.T) {
 
 // TestFullyMountedAssemblyRoster: with auth + workspace the roster is the
 // full merged surface PLUS connection_info (counts derived from the live
-// rosters — UM4 — with the field report's 40+1 pinned literally so a silent
+// rosters — UM4 — with the current 46+1 pinned literally so a silent
 // shrink fails loudly), and connection_info reports the all-ok posture.
 func TestFullyMountedAssemblyRoster(t *testing.T) {
 	// A real client, never called: Tools() is roster-only.
@@ -118,8 +118,8 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 	if want := counts.work + counts.platform + counts.server; len(tools) != want {
 		t.Fatalf("fully mounted roster = %d tools, want %d", len(tools), want)
 	}
-	if len(tools) != 41 {
-		t.Fatalf("fully mounted roster = %d tools, want 41 (40 + connection_info)", len(tools))
+	if len(tools) != 47 {
+		t.Fatalf("fully mounted roster = %d tools, want 47 (46 + connection_info)", len(tools))
 	}
 	last := tools[len(tools)-1].(map[string]interface{})
 	if last["name"] != "connection_info" {

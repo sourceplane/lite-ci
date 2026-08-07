@@ -4,12 +4,17 @@
 // internal/mcpserve; this package supplies the tools.
 //
 // The tool surface is the whole point (agents-and-mcp.md): reads return the
-// fold's output WITH evidence; the write surface is four tools — task_create,
-// task_comment, task_assign, contract_propose — and deliberately nothing
-// else. There is NO lifecycle write tool (lifecycle is a derived query,
-// WP-3: the category "agent lies about status" is unrepresentable) and NO
-// pin tool (pins are human-only, WP-10; the cloud mutator also rejects agent
-// pins server-side — defense in depth, not client-side trust).
+// fold's output WITH evidence; the write surface is mutator-shaped and
+// deliberately small — the v2 four (task_create, task_comment, task_assign,
+// contract_propose), the v4 pair (design_propose, task_regenerate), and the
+// orun-initiatives pair (initiative_create, milestone_upsert). There is NO
+// lifecycle write tool (lifecycle is a derived query, WP-3: the category
+// "agent lies about status" is unrepresentable) and NO pin tool (pins are
+// human-only, WP-10; the cloud mutator also rejects agent pins server-side —
+// defense in depth, not client-side trust). Human-only decisions (approve,
+// adopt, supersede, revoke) have no tool at all; when a write brushes one,
+// the cloud's typed WorkError("human_only", …) verdict surfaces verbatim so
+// the model can tell "not allowed for you" from "does not exist" (IN-4).
 package workmcp
 
 import (
@@ -42,6 +47,15 @@ type WorkAPI interface {
 	GetWorkRollups(ctx context.Context, initiativeKey string) (*remotestate.WorkRollups, error)
 	CreateWorkDesign(ctx context.Context, initiativeKey string, req remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error)
 	RegenerateWorkTasks(ctx context.Context, epicKey, milestone string, req remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error)
+	// orun-initiatives (IN5) — the four derived folds the Initiatives
+	// surface renders, plus the two envelope writes. Decisions stay off
+	// this seam entirely (human_only verdicts come back typed).
+	ListInitiatives(ctx context.Context) (*remotestate.WorkPortfolio, error)
+	GetInitiativeTree(ctx context.Context, key string) (*remotestate.WorkInitiativeTree, error)
+	GetTaskDetail(ctx context.Context, key string) (*remotestate.WorkTaskDetail, error)
+	GetWorkActivity(ctx context.Context, opts remotestate.WorkActivityOptions) (*remotestate.WorkActivity, error)
+	CreateInitiative(ctx context.Context, req remotestate.CreateWorkInitiativeRequest) (*remotestate.WorkMutationResponse, error)
+	UpsertMilestones(ctx context.Context, epicKey string, req remotestate.WorkMilestoneRequest) (*remotestate.WorkMutationResponse, error)
 }
 
 // Server is the work-plane mcpserve.ToolProvider for one workspace-scoped
@@ -98,11 +112,11 @@ func ReadOnly(name string) bool {
 // or irreversibly overwrites), and idempotent:FALSE: unlike the platform
 // writes (per-attempt Idempotency-Key, UM2), the work mutators carry no
 // idempotency key and every call appends a new event to the coordination
-// log — a blind retry of task_create/task_comment/design_propose
-// duplicates the artifact, task_assign/contract_propose append duplicate
-// events, and task_regenerate mints fresh task keys per run. Truthful
-// hints over optimistic ones: a strict client should confirm before
-// replaying a work write.
+// log — a blind retry of task_create/task_comment/design_propose/
+// initiative_create duplicates the artifact, task_assign/contract_propose/
+// milestone_upsert append duplicate events, and task_regenerate mints
+// fresh task keys per run. Truthful hints over optimistic ones: a strict
+// client should confirm before replaying a work write.
 func Tools() []mcpserve.ToolDef {
 	readAnn := mcpserve.Annotations(true, false, true)
 	writeAnn := mcpserve.Annotations(false, false, false)
@@ -132,6 +146,17 @@ func Tools() []mcpserve.ToolDef {
 		{Name: "initiative_get", Description: "One initiative's DERIVED rollup: health with named evidence, progress, per-epic intent + execution. Nothing returned is enterable.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key")}, "initiative"), Annotations: readAnn},
 		{Name: "design_propose", Description: "Create a Draft design under an initiative: a document reference plus a structured proposal (epics → milestones → task skeletons). A design is a PROPOSAL — humans review, compare, and adopt; adoption mints epics and is not available here.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{epics: [{slug, title, docSeed?, milestones[], taskSkeletons[]}]}"}}, "initiative", "title"), Annotations: writeAnn},
 		{Name: "task_regenerate", Description: "Re-plan one milestone in one verdict batch: PLANNED (draft/ready) tasks cancel, in-flight tasks survive, and every proposed contract is applied AND flagged for human review. Tasks are implementation detail (V4-5) — this never touches the epic's approval.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "milestone": str("milestone key, e.g. M1"), "prefix": str("task-key prefix (default WK)"), "tasks": map[string]interface{}{"type": "array", "items": obj(map[string]interface{}{"title": str("task title"), "contract": contractSchema}, "title"), "description": "the replacement plan"}}, "epic", "milestone", "tasks"), Annotations: writeAnn},
+		// orun-initiatives (IN5) — the portfolio surface: four derived
+		// reads and two envelope writes. STILL absent, on purpose: no
+		// approve, no adopt, no supersede, no pin — those are human-only
+		// decisions with no tool to name them; a write that brushes one
+		// gets the cloud's typed human_only verdict, surfaced verbatim.
+		{Name: "initiatives_list", Description: "The portfolio in one read: every initiative with DERIVED status (planning until the first approved epic, the health fold afterwards), two-segment progress (done/active/total), the needs-you reasons that wait on a human, agent assignees, epic rows with intent state, design rows, plus workspace fold-stats. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{}), Annotations: readAnn},
+		{Name: "initiative_tree", Description: "One initiative's full hierarchy — the world to plan against: epics with intent state and approved revision (drift named), milestones with derived state (complete/active/upcoming) and progress, tasks with rungs and delivery evidence, docs with revisions and open threads, and the initiative's design runs.", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
+		{Name: "task_get", Description: "One task's whole page: the task view (derived rung with evidence, contract, pins), its ancestry (initiative/epic/milestone), the folded delivery evidence (branch, PR, checks), components affected (observation diffstats — empty when the world reported none, never invented), and the task-scoped activity tail, newest first.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key"), Annotations: readAnn},
+		{Name: "activity_get", Description: "The tagged activity tail for any noun: both logs folded into one reverse-chronological list of neutral server sentences. The tag trail is ancestry — filtering by an epic covers its milestones' tasks, docs, and designs; an initiative covers its whole subtree. Omit tag for the workspace-wide tail; page with cursor.", InputSchema: obj(map[string]interface{}{"tag": str("item key to filter by, ancestry included (optional)"), "limit": map[string]interface{}{"type": "integer", "description": "maximum entries to return (optional)"}, "cursor": str("resume cursor from a prior page (optional)")}), Annotations: readAnn},
+		{Name: "initiative_create", Description: "Create an initiative envelope (slug + title, optional description/owner/targetDate/successCriteria) through the one mutator surface. Agents may draft the envelope; the why (success criteria) stays human-edited. An initiative has no lifecycle — status derives from its member epics' logs.", InputSchema: obj(map[string]interface{}{"slug": str("initiative slug, lowercase kebab"), "title": str("initiative title"), "description": str("initiative description (optional)"), "owner": str("owner subject (optional)"), "targetDate": str("target date YYYY-MM-DD (optional)"), "successCriteria": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "success criteria bullets (optional)"}}, "slug", "title"), Annotations: writeAnn},
+		{Name: "milestone_upsert", Description: "Apply one ladder edit to an epic's milestones: op create/edit/reorder/remove on one milestone key. Authored intent only (title, goal, doneWhen, targetDate, ordinal) — per-milestone progress stays derived and cannot be entered. Editing an approved epic's ladder drifts the approval (ladderHash); a human re-approves.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "op": str("create | edit | reorder | remove"), "key": str("milestone key, e.g. M2"), "title": str("milestone title (create/edit)"), "goal": str("milestone goal (optional)"), "doneWhen": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "done-when criteria (optional)"}, "targetDate": str("target date YYYY-MM-DD (optional)"), "ordinal": map[string]interface{}{"type": "integer", "description": "ladder position (reorder)"}}, "epic", "op", "key"), Annotations: writeAnn},
 	}
 }
 
@@ -415,6 +440,102 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 			return nil, err
 		}
 		return toolText(fmt.Sprintf("regenerated %s/%s: created %v, canceled %v, kept in-flight %v — proposed contracts are flagged for human review", a.Epic, a.Milestone, out.Created, out.Canceled, out.Kept), false), nil
+
+	case "initiatives_list":
+		portfolio, err := s.API.ListInitiatives(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(portfolio)
+
+	case "initiative_tree":
+		var a struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return nil, fmt.Errorf("initiative_tree: key is required")
+		}
+		tree, err := s.API.GetInitiativeTree(ctx, a.Key)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(tree)
+
+	case "task_get":
+		var a struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return nil, fmt.Errorf("task_get: key is required")
+		}
+		detail, err := s.API.GetTaskDetail(ctx, a.Key)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(detail)
+
+	case "activity_get":
+		var a struct {
+			Tag    string `json:"tag"`
+			Limit  int    `json:"limit"`
+			Cursor string `json:"cursor"`
+		}
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, fmt.Errorf("activity_get: invalid arguments")
+			}
+		}
+		activity, err := s.API.GetWorkActivity(ctx, remotestate.WorkActivityOptions{
+			Tag: a.Tag, Limit: a.Limit, Cursor: a.Cursor,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(activity)
+
+	case "initiative_create":
+		var a struct {
+			Slug            string   `json:"slug"`
+			Title           string   `json:"title"`
+			Description     string   `json:"description"`
+			Owner           string   `json:"owner"`
+			TargetDate      string   `json:"targetDate"`
+			SuccessCriteria []string `json:"successCriteria"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Slug == "" || a.Title == "" {
+			return nil, fmt.Errorf("initiative_create: slug and title are required")
+		}
+		out, err := s.API.CreateInitiative(ctx, remotestate.CreateWorkInitiativeRequest{
+			Slug: a.Slug, Title: a.Title, Description: a.Description,
+			Owner: a.Owner, TargetDate: a.TargetDate, SuccessCriteria: a.SuccessCriteria,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("created initiative %s (event seq %d)", out.Key, out.Seq), false), nil
+
+	case "milestone_upsert":
+		var a struct {
+			Epic       string   `json:"epic"`
+			Op         string   `json:"op"`
+			Key        string   `json:"key"`
+			Title      string   `json:"title"`
+			Goal       string   `json:"goal"`
+			DoneWhen   []string `json:"doneWhen"`
+			TargetDate string   `json:"targetDate"`
+			Ordinal    *int     `json:"ordinal"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Epic == "" || a.Op == "" || a.Key == "" {
+			return nil, fmt.Errorf("milestone_upsert: epic, op, and key are required")
+		}
+		out, err := s.API.UpsertMilestones(ctx, a.Epic, remotestate.WorkMilestoneRequest{
+			Op: a.Op, Key: a.Key, Title: a.Title, Goal: a.Goal,
+			DoneWhen: a.DoneWhen, TargetDate: a.TargetDate, Ordinal: a.Ordinal,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("applied %s to milestone %s on %s (event seq %d)", a.Op, a.Key, a.Epic, out.Seq), false), nil
 
 	default:
 		return nil, fmt.Errorf("unknown tool %s", name)
