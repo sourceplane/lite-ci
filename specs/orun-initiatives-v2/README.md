@@ -4,9 +4,9 @@
 and health become stored speech acts (the delivery fold stays
 unwritable); every noun gets one self-describing key grammar
 (`PAY` · `PAY-D1` · `PAY-E2` · `PAY-E2#M1` · `PAY-T14`) over a machine-id
-rail; the work MCP grows 21 → 36 under allow/ask/deny trust tiers where
-an ask-confirmation is the human signature and `sp_` seats can never
-sign; `work_context` primes any agent from any key (ancestry up, bounded
+rail; the work MCP grows 21 → 37 under allow/ask/deny trust tiers where
+an ask-confirmation is the human signature, every write is
+`clientToken`-idempotent, and `sp_` seats can never sign; `work_context` primes any agent from any key (ancestry up, bounded
 subtree down, budgets echoed); the **worklog** gives every in-flight
 task a live, rate-clamped, fold-inert *now* line (`task_note` /
 `work_now`); and `orun pr open` becomes the provenance pen the cloud's
@@ -41,14 +41,17 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
    `SubmitWorkVerdict`, `ApproveEpic`, `RevokeEpicApproval`,
    `AdoptDesign`, `SupersedeDesign`). Reads retryable, writes not, as
    everywhere.
-2. **The work MCP grows 21 → 36 under tiers** (`internal/workmcp`):
-   `work_context`, `work_now`, `initiative_updates_get` (reads);
+2. **The work MCP grows 21 → 37 under tiers** (`internal/workmcp`):
+   `work_context`, `work_now`, `work_yours` (the addressed personal
+   queue), `initiative_updates_get` (reads);
    `item_assign` (absorbing `task_assign`, which stays registered),
    `review_request`, `review_verdict`, `task_done`, `task_note`,
    `initiative_update_post`, `initiative_status_set`, `design_adopt`,
    `design_supersede`, `epic_approve`, `epic_revoke_approval`, `pr_open`
    (writes; `task_note` allow-tier for `sp_` seats — narration is
-   exactly what autonomous seats owe). Tier plumbing: allow/ask/deny per agent type; **ask**
+   exactly what autonomous seats owe; every write schema carries
+   `clientToken` and the client defaults it on — retries are safe by
+   construction). Tier plumbing: allow/ask/deny per agent type; **ask**
    surfaces a harness confirmation and proceeds under the *user
    principal* with `via: mcp/<session>` — the confirmation is the
    signature; for `sp_` seats ask resolves to deny. `human_only`
@@ -59,8 +62,9 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
    `start|pause|resume|complete|cancel|reopen`, `update`/`updates`,
    `context`, `assign`, `review request|verdict`, `adopt` (interactive
    confirm = the signature), `task done`, `task note` (the worklog),
-   `now` (the live board), list filters; `orun pr open|check|link`,
-   `orun githooks install`, `orun skills list|pull`.
+   `now` (the live board), `yours` (the addressed queue), list filters;
+   `orun pr open|check|link` (incl. `--quick`, minting a `WRK` triage
+   task inline), `orun githooks install`, `orun skills list|pull`.
 4. **The provenance pen + preflight** (IS6): branch grammar
    (`orun/<task-key>-<slug>`), manifest v1, `Orun-Task:` trailer, and the
    **shared compliance rule engine** — the Go evaluation of the same
@@ -90,7 +94,7 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
    facts fixture-pinned.
 2. No tool renamed, ever; growth additive; `task_assign` forwards.
 3. An `sp_` seat cannot reach a signature by any composition of tools —
-   asserted by test against the full 36-tool roster.
+   asserted by test against the full 37-tool roster.
 4. Every MCP-originated event carries `via`; events without attribution
    fail validation locally before the wire.
 5. `orun pr check` and the cloud evaluator return byte-identical
