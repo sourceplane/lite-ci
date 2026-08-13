@@ -34,6 +34,10 @@ type Lifecycle struct {
 	Ready    bool     `json:"ready"`   // contract complete (= agent-ready when not blocked)
 	Blocked  bool     `json:"blocked"` // open blockedBy dep — a flag, never a rung
 	Evidence []string `json:"evidence,omitempty"`
+	// AssertedBy is set when the ASSERTION lane — not observation —
+	// produced the rung (IS3, design §7.1). Every derived pixel names its
+	// source (WV-2).
+	AssertedBy *Actor `json:"assertedBy,omitempty"`
 }
 
 // DriftItem is a merged PR whose affected components no open task claims —
@@ -88,10 +92,16 @@ func Fold(ws WorkSet) FoldResult {
 	canceled := map[string]Actor{}
 	pins := map[string]*Pin{}
 	blockers := map[string]map[string]bool{} // target key -> open set of blocker keys
+	// IS3 (design §7.1): the assertion lane — the weakest voice at the
+	// table. progress_noted is deliberately NOT read anywhere in this
+	// fold: narration is inert (IS-8).
+	asserted := map[string]Actor{}
 	for _, e := range ws.Events {
 		switch e.Kind {
 		case EventCanceled:
 			canceled[e.Subject] = e.Actor
+		case EventDoneAsserted:
+			asserted[e.Subject] = e.Actor
 		case EventPinned:
 			p, ok := e.PinOf()
 			if !ok {
@@ -244,7 +254,22 @@ func Fold(ws WorkSet) FoldResult {
 			continue
 		}
 		lc.Rung, lc.Evidence = observedRung(t, claims[t.Key], gates, gateKey, live)
-		lc.Blocked = isBlocked(t, tasks, canceled, blockers, claims, gates, gateKey, live)
+		// IS3 (design §7.1): an asserted done stands UNLESS live evidence
+		// at in_review or above contradicts it — an open non-draft PR
+		// holds the task ("you can't talk a task past its own pull
+		// request"); merged-PR outcomes hold their observed rung;
+		// released stays evidence-only, unconditionally.
+		if by, isAsserted := asserted[t.Key]; isAsserted {
+			oi, _ := RungIndex(lc.Rung)
+			ri, _ := RungIndex(RungInReview)
+			if oi < ri {
+				actor := by
+				lc.Rung = RungDone
+				lc.Evidence = []string{fmt.Sprintf("done asserted by %s", by.ID)}
+				lc.AssertedBy = &actor
+			}
+		}
+		lc.Blocked = isBlocked(t, tasks, canceled, asserted, blockers, claims, gates, gateKey, live)
 		if pin := pins[t.Key]; pin != nil {
 			oi, okO := RungIndex(lc.Rung)
 			pi, okP := RungIndex(pin.Rung)
@@ -350,7 +375,7 @@ func observedRung(t Task, claiming []*prState, gates map[string]GateStatus, gate
 // isBlocked derives the Blocked flag from open blockedBy deps and open
 // `blocks` relations (v3 PM2) — a flag, not a rung, so it can never go
 // stale by forgetting to un-set it.
-func isBlocked(t Task, tasks map[string]Task, canceled map[string]Actor, blockers map[string]map[string]bool, claims map[string][]*prState, gates map[string]GateStatus, gateKey func(string, string) string, live map[string]string) bool {
+func isBlocked(t Task, tasks map[string]Task, canceled map[string]Actor, asserted map[string]Actor, blockers map[string]map[string]bool, claims map[string][]*prState, gates map[string]GateStatus, gateKey func(string, string) string, live map[string]string) bool {
 	open := func(key string) bool {
 		blocker, ok := tasks[key]
 		if !ok {
@@ -360,6 +385,15 @@ func isBlocked(t Task, tasks map[string]Task, canceled map[string]Actor, blocker
 			return false
 		}
 		rung, _ := observedRung(blocker, claims[key], gates, gateKey, live)
+		// IS3: an uncontradicted asserted-done blocker unblocks its
+		// dependents — the same weakest-voice rule its own rung follows.
+		if _, isAsserted := asserted[key]; isAsserted {
+			oi, _ := RungIndex(rung)
+			ri, _ := RungIndex(RungInReview)
+			if oi < ri {
+				return false
+			}
+		}
 		return rung != RungDone && rung != RungReleased
 	}
 	if t.Contract != nil {

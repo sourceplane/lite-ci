@@ -288,6 +288,43 @@
           "ORN-28": { "rung": "done", "ready": true, "blocked": false, "evidence": ["PR o/r#55 merged"] }
         }
       }
+    },
+    {
+      "name": "IS3: an asserted done stands when evidence is silent (the weakest voice) and unblocks its dependent",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-30", "workspace": "ws_test", "title": "write the runbook", "contract": { "goal": "g", "affects": ["docs"], "doneWhen": ["published"], "gates": [], "gatesDefined": true }, "createdBy": { "type": "user", "id": "usr_1" } },
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-31", "workspace": "ws_test", "title": "follow-up", "contract": { "goal": "g", "affects": ["docs"], "doneWhen": ["d"], "gates": [], "gatesDefined": true, "deps": ["ORN-30"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-30", "kind": "done_asserted", "actor": { "type": "agent", "id": "sp_1" }, "at": "2026-07-02T12:00:00Z", "payload": { "note": "published by hand" }, "seq": 1 },
+        { "workspace": "ws_test", "subject": "ORN-30", "kind": "progress_noted", "actor": { "type": "agent", "id": "sp_1" }, "at": "2026-07-02T12:01:00Z", "payload": { "text": "narration is inert (IS-8)" }, "seq": 2 }
+      ],
+      "observations": [],
+      "expect": {
+        "lifecycles": {
+          "ORN-30": { "rung": "done", "ready": true, "blocked": false, "evidence": ["done asserted by sp_1"] },
+          "ORN-31": { "rung": "ready", "ready": true, "blocked": false }
+        }
+      }
+    },
+    {
+      "name": "IS3: an open non-draft PR holds an asserted task at in_review — you cannot talk a task past its own pull request",
+      "workspace": "ws_test",
+      "tasks": [
+        { "apiVersion": "orun.io/v1", "kind": "Task", "key": "ORN-32", "workspace": "ws_test", "title": "wire the gate", "contract": { "goal": "g", "affects": ["svc/api"], "doneWhen": ["d"], "gates": ["tests"] }, "createdBy": { "type": "user", "id": "usr_1" } }
+      ],
+      "events": [
+        { "workspace": "ws_test", "subject": "ORN-32", "kind": "done_asserted", "actor": { "type": "agent", "id": "sp_1" }, "at": "2026-07-02T12:02:00Z", "payload": { "note": "done I swear" }, "seq": 1 }
+      ],
+      "observations": [
+        { "workspace": "ws_test", "source": "github-webhook", "sourceVersion": 1, "kind": "pr_opened", "at": "2026-07-02T12:03:00Z", "dedupeKey": "gh:pr:o/r#60:opened", "payload": { "pr": "o/r#60", "taskKeys": ["ORN-32"] }, "seq": 1 }
+      ],
+      "expect": {
+        "lifecycles": {
+          "ORN-32": { "rung": "in_review", "ready": true, "blocked": false, "evidence": ["PR o/r#60 open"] }
+        }
+      }
     }
   ]
 }

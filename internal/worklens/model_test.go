@@ -21,7 +21,7 @@ func TestEventValidate(t *testing.T) {
 	}
 
 	e = base
-	e.Kind = "status_changed" // the v1 kind that must not exist in v2
+	e.Kind = "rung_set" // a task-rung write must never exist (WP-3, narrowed by IS2)
 	if err := e.Validate(); err == nil {
 		t.Error("unknown event kind accepted (closed vocabulary)")
 	}
@@ -48,10 +48,59 @@ func TestEventValidate(t *testing.T) {
 }
 
 func TestNoLifecycleWriteKindExists(t *testing.T) {
+	// WP-3, narrowed by IS2 (orun-initiatives-v2): "no stored status"
+	// became "no stored DELIVERY status". status_changed exists since IS2,
+	// but it is the INITIATIVE lifecycle stage — a speech act, payload-
+	// gated human-only into/out of terminal states (IS-4) — never a task
+	// rung. The task-rung write stays unrepresentable.
 	for _, k := range EventKinds {
-		if k == "status_changed" || k == "lifecycle_changed" || k == "rung_set" || k == "status_set" {
-			t.Fatalf("lifecycle write kind %q exists — lifecycle is a derived query (WP-3)", k)
+		if k == "lifecycle_changed" || k == "rung_set" || k == "rung_changed" || k == "status_set" || k == "task_status_changed" {
+			t.Fatalf("task-rung write kind %q exists — delivery lifecycle is a derived query (WP-3)", k)
 		}
+	}
+}
+
+func TestStatusChangedTerminalMovesAreHumanOnly(t *testing.T) {
+	// IS-4: entering or leaving completed/canceled is a signature; the
+	// working moves stay open to attributed agents.
+	move := func(from, to string, actor Actor) error {
+		e := CoordinationEvent{
+			Workspace: "ws", Subject: "payments", Kind: EventStatusChanged,
+			Actor: actor, At: "2026-08-01T10:00:00Z", Seq: 1,
+			Payload: json.RawMessage(`{"from":"` + from + `","to":"` + to + `"}`),
+		}
+		return e.Validate()
+	}
+	agent := Actor{Type: ActorAgent, ID: "sp_1"}
+	user := Actor{Type: ActorUser, ID: "usr_1"}
+	if err := move("planning", "active", agent); err != nil {
+		t.Errorf("agent start rejected: %v", err)
+	}
+	if err := move("active", "paused", agent); err != nil {
+		t.Errorf("agent pause rejected: %v", err)
+	}
+	for _, m := range [][2]string{{"active", "completed"}, {"active", "canceled"}, {"completed", "active"}, {"canceled", "planning"}} {
+		if err := move(m[0], m[1], agent); err == nil {
+			t.Errorf("agent %s → %s accepted — terminal moves are human-only (IS-4)", m[0], m[1])
+		}
+		if err := move(m[0], m[1], user); err != nil {
+			t.Errorf("human %s → %s rejected: %v", m[0], m[1], err)
+		}
+	}
+}
+
+func TestDoneAssertedNeedsANote(t *testing.T) {
+	e := CoordinationEvent{
+		Workspace: "ws", Subject: "ORN-T1", Kind: EventDoneAsserted,
+		Actor: Actor{Type: ActorAgent, ID: "sp_1"}, At: "2026-08-01T10:00:00Z", Seq: 1,
+		Payload: json.RawMessage(`{}`),
+	}
+	if err := e.Validate(); err == nil {
+		t.Error("note-less assertion accepted — an assertion without a reason is a status write (design §7.1)")
+	}
+	e.Payload = json.RawMessage(`{"note":"published by hand"}`)
+	if err := e.Validate(); err != nil {
+		t.Errorf("noted assertion rejected: %v", err)
 	}
 }
 
