@@ -255,6 +255,10 @@ type EditWorkItemRequest struct {
 	TargetDate      *string           `json:"targetDate,omitempty"`
 	Owner           *string           `json:"owner,omitempty"`
 	SuccessCriteria []string          `json:"successCriteria,omitempty"`
+	// IS-L (design §15): the last coordination seq the caller read for this
+	// item. A lost race answers 409 with the winning seq and current value —
+	// a legible retry, never a silent overwrite. The skills teach: send it.
+	IfSeq *int64 `json:"ifSeq,omitempty"`
 }
 
 // EditWorkItem edits an item's envelope through the one mutator (item_edited).
@@ -740,16 +744,23 @@ func (c *Client) GetTaskDetail(ctx context.Context, key string) (*WorkTaskDetail
 // WorkActivityOptions filters the tagged activity tail. Empty fields are
 // omitted. Tag ancestry is server-side: filtering by an epic covers its
 // milestones' tasks, docs, and designs; an initiative covers its subtree.
+// Narration is exclude|include|only (IS3; server default exclude);
+// After/WaitSeconds ride the IS-Q long-poll bridge.
 type WorkActivityOptions struct {
-	Tag    string
-	Limit  int
-	Cursor string
+	Tag         string
+	Limit       int
+	Cursor      string
+	Narration   string
+	After       int64
+	WaitSeconds int
 }
 
 // WorkActivity is the reverse-chronological tail (WorkActivityResponse).
+// Seq is the long-poll watermark.
 type WorkActivity struct {
 	Entries    []WorkActivityEntry `json:"entries"`
 	NextCursor string              `json:"nextCursor,omitempty"`
+	Seq        int64               `json:"seq,omitempty"`
 }
 
 // GetWorkActivity fetches the tagged activity tail: both logs folded into
@@ -765,6 +776,10 @@ func (c *Client) GetWorkActivity(ctx context.Context, opts WorkActivityOptions) 
 	if opts.Cursor != "" {
 		q.Set("cursor", opts.Cursor)
 	}
+	if opts.Narration != "" {
+		q.Set("narration", opts.Narration)
+	}
+	setLongPoll(q, opts.After, opts.WaitSeconds)
 	path := c.workPath("/activity")
 	if enc := q.Encode(); enc != "" {
 		path += "?" + enc
@@ -1108,12 +1123,16 @@ func (c *Client) PostTaskNote(ctx context.Context, key string, req PostTaskNoteR
 }
 
 // WorkNowOptions filters the live board. Empty fields are omitted.
+// After/WaitSeconds ride the IS-Q long-poll bridge: the server holds the
+// read until the logs move past After or the window (≤25s) closes.
 type WorkNowOptions struct {
-	Initiative string
-	Epic       string
-	Seat       string
-	Limit      int
-	Cursor     string
+	Initiative  string
+	Epic        string
+	Seat        string
+	Limit       int
+	Cursor      string
+	After       int64
+	WaitSeconds int
 }
 
 // WorkNowLine is the live *now* line: the newest worklog note on a task.
@@ -1138,10 +1157,12 @@ type WorkNowRow struct {
 	Quiet      bool         `json:"quiet"`
 }
 
-// WorkNow is the live board (WorkNowResponse), cursor-paged.
+// WorkNow is the live board (WorkNowResponse), cursor-paged. Seq is the
+// long-poll watermark — pass it back as After for anything newer.
 type WorkNow struct {
 	Rows       []WorkNowRow `json:"rows"`
 	NextCursor string       `json:"nextCursor,omitempty"`
+	Seq        int64        `json:"seq,omitempty"`
 }
 
 // GetWorkNow fetches the live board (GET /work/now): what every agent is
@@ -1163,11 +1184,84 @@ func (c *Client) GetWorkNow(ctx context.Context, opts WorkNowOptions) (*WorkNow,
 	if opts.Cursor != "" {
 		q.Set("cursor", opts.Cursor)
 	}
+	setLongPoll(q, opts.After, opts.WaitSeconds)
 	path := c.workPath("/now")
 	if enc := q.Encode(); enc != "" {
 		path += "?" + enc
 	}
 	var resp WorkNow
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// setLongPoll emits the IS-Q params: only a positive After long-polls
+// (seq 0 means "no watermark yet" — an ordinary immediate read).
+func setLongPoll(q url.Values, after int64, waitSeconds int) {
+	if after <= 0 {
+		return
+	}
+	q.Set("after", strconv.FormatInt(after, 10))
+	if waitSeconds > 0 {
+		q.Set("waitSeconds", strconv.Itoa(waitSeconds))
+	}
+}
+
+// WorkAttentionItem is AttentionItem v1 — the vendored cross-plane
+// attention contract (orun-cloud specs/epics/orun-initiatives-v2/
+// attention-item.md): one addressed, actionable item; Yours is the only
+// renderer in the product (IS-9: no second inbox).
+type WorkAttentionItem struct {
+	ID      string `json:"id"`     // stable per (person, kind, subject)
+	Person  string `json:"person"` // the addressee — always resolved
+	Kind    string `json:"kind"`
+	Subject struct {
+		Key        string `json:"key"`
+		PublicID   string `json:"publicId"`
+		Initiative string `json:"initiative"`
+	} `json:"subject"`
+	Reason string `json:"reason"` // one sentence, render-ready
+	Since  string `json:"since"`  // when it became actionable
+	Source string `json:"source"` // work | fleet
+	Act    struct {
+		Tool string `json:"tool,omitempty"` // the MCP gesture that clears it
+		URL  string `json:"url"`
+	} `json:"act"`
+}
+
+// WorkYoursOptions pages the personal queue; After/WaitSeconds long-poll.
+type WorkYoursOptions struct {
+	Limit       int
+	Cursor      string
+	After       int64
+	WaitSeconds int
+}
+
+// WorkYours is the caller's addressed queue (WorkYoursResponse),
+// newest-decision-first.
+type WorkYours struct {
+	Items      []WorkAttentionItem `json:"items"`
+	NextCursor string              `json:"nextCursor,omitempty"`
+	Seq        int64               `json:"seq,omitempty"`
+}
+
+// GetWorkYours fetches the caller's addressed attention queue
+// (GET /work/yours) — the daily driver: what waits on YOU, one list.
+func (c *Client) GetWorkYours(ctx context.Context, opts WorkYoursOptions) (*WorkYours, error) {
+	q := url.Values{}
+	if opts.Limit > 0 {
+		q.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	if opts.Cursor != "" {
+		q.Set("cursor", opts.Cursor)
+	}
+	setLongPoll(q, opts.After, opts.WaitSeconds)
+	path := c.workPath("/yours")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp WorkYours
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
 	}

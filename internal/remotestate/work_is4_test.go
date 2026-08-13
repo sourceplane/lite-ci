@@ -178,6 +178,54 @@ func TestIS4NowRoute(t *testing.T) {
 			t.Errorf("now query %q lacks %s", rec.query, want)
 		}
 	}
+	// IS-Q: a positive After emits the long-poll pair; zero emits neither
+	// (seq 0 = no watermark yet, an ordinary immediate read).
+	if strings.Contains(rec.query, "after=") {
+		t.Errorf("now query %q long-polls without a watermark", rec.query)
+	}
+	if _, err := c.GetWorkNow(context.Background(), remotestate.WorkNowOptions{After: 41, WaitSeconds: 20}); err != nil {
+		t.Fatalf("GetWorkNow long-poll: %v", err)
+	}
+	for _, want := range []string{"after=41", "waitSeconds=20"} {
+		if !strings.Contains(rec.query, want) {
+			t.Errorf("now long-poll query %q lacks %s", rec.query, want)
+		}
+	}
+}
+
+// TestIS2bYoursRoute: the addressed queue read — route, paging, and the
+// long-poll pair; the watermark and items decode.
+func TestIS2bYoursRoute(t *testing.T) {
+	srv, rec := workServer(t, map[string]interface{}{
+		"items": []interface{}{map[string]interface{}{
+			"id": "att:approval_drifted:checkout:usr_dana", "person": "usr_dana",
+			"kind": "approval_drifted", "reason": "checkout approval drifted",
+			"since": "2026-08-10T00:00:00Z", "source": "work",
+			"subject": map[string]interface{}{"key": "checkout", "publicId": "epc_1", "initiative": "pay"},
+			"act":     map[string]interface{}{"tool": "epic_approve", "url": "/work/items/checkout"},
+		}},
+		"seq": 77,
+	})
+	c := workTestClient(srv)
+	queue, err := c.GetWorkYours(context.Background(), remotestate.WorkYoursOptions{Limit: 10, After: 50, WaitSeconds: 25})
+	if err != nil {
+		t.Fatalf("GetWorkYours: %v", err)
+	}
+	if rec.method != "GET" || rec.path != "/v1/organizations/acme/work/yours" {
+		t.Errorf("yours route = %s %s", rec.method, rec.path)
+	}
+	for _, want := range []string{"limit=10", "after=50", "waitSeconds=25"} {
+		if !strings.Contains(rec.query, want) {
+			t.Errorf("yours query %q lacks %s", rec.query, want)
+		}
+	}
+	if queue.Seq != 77 || len(queue.Items) != 1 {
+		t.Fatalf("yours = %+v", queue)
+	}
+	item := queue.Items[0]
+	if item.Person != "usr_dana" || item.Act.Tool != "epic_approve" || item.Subject.Initiative != "pay" {
+		t.Errorf("attention item = %+v", item)
+	}
 }
 
 func TestIS4DecisionRoutes(t *testing.T) {

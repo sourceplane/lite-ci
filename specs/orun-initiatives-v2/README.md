@@ -23,7 +23,7 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
 
 | Field | Value |
 |-------|-------|
-| Status | **In flight — IS4** (oracle slice #618; client + tiered MCP 21→35 + CLI verbs + `initiative-owner` this slice; `work_yours` rides IS2b, `pr_open` rides IS6 → 37) |
+| Status | **In flight — IS4** (oracle #618; client + tiered MCP + CLI + `initiative-owner` #619; `work_yours` + long-poll + ifSeq this slice → roster 36; `pr_open` rides IS6 → 37) |
 | Builds on | `specs/orun-work/` (v2 fold + two logs), `specs/orun-work-v4/` (hierarchy, human-only sealed approval, drift), `specs/orun-initiatives/` (the 21-tool roster, `orun initiatives` group) |
 | Coordinates with | orun-cloud `specs/epics/orun-initiatives-v2/` (authoritative: schema, endpoints, compliance App, skills registry, console) |
 | Wire | `/v1/organizations/{org}/work/*` — unchanged prefix, additive only (IN-A carried) |

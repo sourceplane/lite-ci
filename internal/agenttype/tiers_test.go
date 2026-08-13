@@ -73,7 +73,7 @@ func TestShippedTierMatrices(t *testing.T) {
 	for _, n := range d.Tools.Allow {
 		allow[n] = true
 	}
-	for _, n := range []string{"work_context", "work_now", "task_note", "task_done",
+	for _, n := range []string{"work_context", "work_now", "work_yours", "task_note", "task_done",
 		"initiative_update_post", "initiative_status_set", "initiative_create",
 		"design_propose", "review_request", "review_verdict", "item_assign"} {
 		if !allow[n] {

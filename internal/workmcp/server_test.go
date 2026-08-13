@@ -232,6 +232,21 @@ func (f *fakeAPI) GetWorkContext(_ context.Context, ref string, opts remotestate
 		Budget:   []remotestate.WorkContextBudget{{Level: "tasks", Returned: 50, Total: 90, Cursor: "c1"}},
 	}, nil
 }
+func (f *fakeAPI) GetWorkYours(_ context.Context, opts remotestate.WorkYoursOptions) (*remotestate.WorkYours, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	item := remotestate.WorkAttentionItem{
+		ID: "att:approval_drifted:demo-epic:usr_dana", Person: "usr_dana",
+		Kind: "approval_drifted", Reason: "demo-epic approval drifted",
+		Since: "2026-08-10T00:00:00Z", Source: "work",
+	}
+	item.Subject.Key = "demo-epic"
+	item.Subject.Initiative = "ai-native-work"
+	item.Act.Tool = "epic_approve"
+	item.Act.URL = "/work/items/demo-epic"
+	return &remotestate.WorkYours{Items: []remotestate.WorkAttentionItem{item}, Seq: 12}, nil
+}
 func (f *fakeAPI) GetWorkNow(_ context.Context, opts remotestate.WorkNowOptions) (*remotestate.WorkNow, error) {
 	if f.failNext != nil {
 		return nil, f.failNext
@@ -413,8 +428,8 @@ func TestInitializeAndToolSurface(t *testing.T) {
 		"design_propose", "task_regenerate",
 		"initiatives_list", "initiative_tree", "task_get", "activity_get",
 		"initiative_create", "milestone_upsert",
-		// orun-initiatives-v2 (IS4) — the pen.
-		"work_context", "work_now", "initiative_updates_get",
+		// orun-initiatives-v2 (IS4/IS2b) — the pen and the queue.
+		"work_context", "work_now", "work_yours", "initiative_updates_get",
 		"item_assign", "review_request", "review_verdict",
 		"task_done", "task_note",
 		"initiative_update_post", "initiative_status_set",
@@ -425,8 +440,8 @@ func TestInitializeAndToolSurface(t *testing.T) {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 35 {
-		t.Errorf("tool surface = %d tools, want exactly 35 (closed: 16 reads + 19 writes — IS4; work_yours rides the IS2b server leg and pr_open rides IS6, completing the 37)", len(tools))
+	if len(tools) != 36 {
+		t.Errorf("tool surface = %d tools, want exactly 36 (closed: 17 reads + 19 writes — IS4+IS2b; pr_open rides IS6, completing the 37)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	// The sweep runs over the composed server's tools/list (the merged
@@ -486,8 +501,8 @@ func TestWireAnnotations(t *testing.T) {
 		"milestone_get": true, "design_get": true, "initiative_get": true,
 		"initiatives_list": true, "initiative_tree": true, "task_get": true,
 		"activity_get": true,
-		// IS4
-		"work_context": true, "work_now": true, "initiative_updates_get": true,
+		// IS4 + IS2b
+		"work_context": true, "work_now": true, "work_yours": true, "initiative_updates_get": true,
 	}
 	for _, tool := range Tools() {
 		want := map[string]bool{
@@ -716,6 +731,7 @@ func TestIS4Reads(t *testing.T) {
 		callLine(3, "initiative_updates_get", `{"key":"ai-native-work"}`),
 		callLine(4, "work_context", `{}`),
 		callLine(5, "initiative_updates_get", `{}`),
+		callLine(6, "work_yours", `{"after":5,"waitSeconds":10}`),
 	)
 	text, isErr := resultText(t, responses[0])
 	if isErr || !strings.Contains(text, `"canonicalKey": "PAY-T14"`) {
@@ -740,6 +756,15 @@ func TestIS4Reads(t *testing.T) {
 	}
 	if text, isErr = resultText(t, responses[4]); !isErr || !strings.Contains(text, "key is required") {
 		t.Fatalf("initiative_updates_get without a key must fail: %s", text)
+	}
+	// IS2b: the addressed queue — every item carries its person and the one
+	// gesture that clears it, and the seq watermark rides the response.
+	text, isErr = resultText(t, responses[5])
+	if isErr || !strings.Contains(text, `"person": "usr_dana"`) || !strings.Contains(text, `"tool": "epic_approve"`) {
+		t.Fatalf("work_yours lacks the addressed queue: %s", text)
+	}
+	if !strings.Contains(text, `"seq": 12`) {
+		t.Fatalf("work_yours lacks the long-poll watermark: %s", text)
 	}
 }
 

@@ -22,7 +22,7 @@ tools:
   allow: [work_query, work_get, spec_get, work_timeline, spec_doc,
           epic_brief, milestone_get, design_get, initiative_get,
           initiatives_list, initiative_tree, task_get, activity_get,
-          work_context, work_now, initiative_updates_get,
+          work_context, work_now, work_yours, initiative_updates_get,
           catalog_get_component, catalog_affected, task_comment,
           task_note, task_done, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead]

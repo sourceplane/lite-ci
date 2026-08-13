@@ -111,8 +111,8 @@ func TestPromptToolDriftGuard(t *testing.T) {
 	for _, tool := range (&mcpserve.ConnectionInfoProvider{}).Tools() {
 		roster[tool.Name] = true
 	}
-	if len(roster) != 61 {
-		t.Fatalf("composed roster = %d tools, want 61 (35 work + 25 platform + 1 built-in)", len(roster))
+	if len(roster) != 62 {
+		t.Fatalf("composed roster = %d tools, want 62 (36 work + 25 platform + 1 built-in)", len(roster))
 	}
 
 	tokenPattern := regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)
