@@ -2,10 +2,14 @@ package remotestate
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Work-plane client (orun-work v2 WP1) — the CLI's seam onto the cloud work
@@ -827,6 +831,533 @@ type WorkMilestoneRequest struct {
 func (c *Client) UpsertMilestones(ctx context.Context, epicKey string, req WorkMilestoneRequest) (*WorkMutationResponse, error) {
 	var resp WorkMutationResponse
 	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(epicKey)+"/milestones"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── orun-initiatives-v2 (IS4) — the wire client grows: the universal
+// resolver + context bundle (IS1), the stored initiative speech acts (IS2),
+// the agent's voice + generalized assign (IS3), and clients for the v4
+// decision endpoints that never had them. Wire shapes mirror
+// @saas/contracts/work; the authoritative surface is
+// specs/epics/orun-initiatives-v2/api-and-mcp.md (orun-cloud).
+//
+// Idempotency (IS-L): the writes whose contracts carry `clientToken` default
+// it on here — when the caller supplies none, the client mints one — and ride
+// doJSON's retry lane: a replayed token returns the original {key, seq} with
+// replayed:true instead of acting twice, so a 5xx retry is safe by
+// construction. A FRESH call still mints a fresh token and appends anew; only
+// the transport retry is idempotent, not the tool call above it.
+
+// newClientToken mints a per-attempt idempotency token (IS-L).
+func newClientToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Out of entropy is not a reason to drop a write; the token is an
+		// optimization (replay safety), never a correctness requirement.
+		return ""
+	}
+	return "ct_" + hex.EncodeToString(b[:])
+}
+
+// WorkItemResolve mirrors WorkItemResolveResponse: the universal resolver's
+// answer. Off-canonical hits (letterless, wrong-letter, alias, machine id)
+// carry the form they arrived by in MovedFrom.
+type WorkItemResolve struct {
+	Kind         string `json:"kind"` // initiative | design | epic | milestone | task
+	Key          string `json:"key"`
+	CanonicalKey string `json:"canonicalKey"`
+	PublicID     string `json:"publicId,omitempty"`
+	Title        string `json:"title"`
+	MovedFrom    string `json:"movedFrom,omitempty"`
+}
+
+// GetWorkItem resolves any ref — canonical key, letterless number form,
+// alias, or machine id — to its typed item. 404 (never 403) on a miss.
+func (c *Client) GetWorkItem(ctx context.Context, ref string) (*WorkItemResolve, error) {
+	var resp WorkItemResolve
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/items/"+urlSegment(ref)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkContextOptions bounds the context bundle. Zero values take the
+// server's defaults (depth 2, perLevel 50, activity 20).
+type WorkContextOptions struct {
+	Depth    int
+	PerLevel int
+	Activity int
+}
+
+// WorkContextNode is one ancestor in the bundle, nearest-first, root last,
+// each with its live state word (rung / milestone state / intent state /
+// initiative status).
+type WorkContextNode struct {
+	Kind         string `json:"kind"`
+	Key          string `json:"key"`
+	CanonicalKey string `json:"canonicalKey"`
+	PublicID     string `json:"publicId,omitempty"`
+	Title        string `json:"title"`
+	State        string `json:"state,omitempty"`
+}
+
+// WorkContextBudget is the truncation echo (IS-H: no silent caps) — every
+// bounded level reports what it returned out of what exists, with a cursor.
+type WorkContextBudget struct {
+	Level    string `json:"level"`
+	Returned int    `json:"returned"`
+	Total    int    `json:"total"`
+	Cursor   string `json:"cursor,omitempty"`
+}
+
+// WorkContextItem names the resolved item the bundle centers on.
+type WorkContextItem struct {
+	Kind         string `json:"kind"`
+	Key          string `json:"key"`
+	CanonicalKey string `json:"canonicalKey"`
+	PublicID     string `json:"publicId,omitempty"`
+	Title        string `json:"title"`
+}
+
+// WorkContext is the any-key context bundle (design §5): the item's full
+// view (typed by kind — handed to the agent verbatim), ancestry to the root,
+// the activity tail, and open needs-you in scope. The intended first read of
+// every agent session.
+type WorkContext struct {
+	Item           WorkContextItem      `json:"item"`
+	View           json.RawMessage      `json:"view"`
+	Ancestry       []WorkContextNode    `json:"ancestry"`
+	Activity       []WorkActivityEntry  `json:"activity"`
+	ActivityCursor string               `json:"activityCursor,omitempty"`
+	NeedsYou       []WorkNeedsYouReason `json:"needsYou"`
+	Budget         []WorkContextBudget  `json:"budget"`
+	MovedFrom      string               `json:"movedFrom,omitempty"`
+}
+
+// GetWorkContext fetches the context bundle for any ref.
+func (c *Client) GetWorkContext(ctx context.Context, ref string, opts WorkContextOptions) (*WorkContext, error) {
+	q := url.Values{}
+	if opts.Depth > 0 {
+		q.Set("depth", strconv.Itoa(opts.Depth))
+	}
+	if opts.PerLevel > 0 {
+		q.Set("perLevel", strconv.Itoa(opts.PerLevel))
+	}
+	if opts.Activity > 0 {
+		q.Set("activity", strconv.Itoa(opts.Activity))
+	}
+	path := c.workPath("/items/" + urlSegment(ref) + "/context")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp WorkContext
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetInitiativeStatusRequest mirrors SetWorkInitiativeStatusRequest — the
+// five-state machine's transition body. Force acknowledges open member tasks
+// on complete (the warn never blocks).
+type SetInitiativeStatusRequest struct {
+	To          string `json:"to"`
+	Comment     string `json:"comment,omitempty"`
+	Force       bool   `json:"force,omitempty"`
+	ClientToken string `json:"clientToken,omitempty"`
+}
+
+// SetInitiativeStatusResponse carries the machine's answer. An illegal move
+// never reaches here — it is a 409 whose details name allowedTransitions.
+type SetInitiativeStatusResponse struct {
+	Key      string `json:"key"`
+	Seq      int64  `json:"seq"`
+	Status   string `json:"status"`
+	Warning  string `json:"warning,omitempty"`
+	Replayed bool   `json:"replayed,omitempty"`
+}
+
+// SetInitiativeStatus moves an initiative through the stored state machine
+// (POST /work/initiatives/{key}/status). complete/cancel/reopen/restore are
+// human-only server-side (IS-4, typed human_only verdict).
+func (c *Client) SetInitiativeStatus(ctx context.Context, key string, req SetInitiativeStatusRequest) (*SetInitiativeStatusResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp SetInitiativeStatusResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(key)+"/status"), req, &resp, req.ClientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkInitiativeUpdateView is one posted update — health is never set
+// directly; it is the headline of the latest update (design §2).
+type WorkInitiativeUpdateView struct {
+	PublicID   string    `json:"publicId"`
+	Initiative string    `json:"initiative"`
+	Health     string    `json:"health"`
+	Body       string    `json:"body"`
+	Author     WorkActor `json:"author"`
+	CreatedAt  string    `json:"createdAt"`
+	EditedAt   string    `json:"editedAt,omitempty"`
+}
+
+// PostInitiativeUpdateRequest mirrors PostWorkInitiativeUpdateRequest.
+type PostInitiativeUpdateRequest struct {
+	Health      string `json:"health"`
+	Body        string `json:"body"`
+	ClientToken string `json:"clientToken,omitempty"`
+}
+
+// PostInitiativeUpdateResponse carries the created update view.
+type PostInitiativeUpdateResponse struct {
+	Key      string                   `json:"key"`
+	Seq      int64                    `json:"seq"`
+	Update   WorkInitiativeUpdateView `json:"update"`
+	Replayed bool                     `json:"replayed,omitempty"`
+}
+
+// PostInitiativeUpdate posts an attributed health update
+// (POST /work/initiatives/{key}/updates), stamping the headline.
+func (c *Client) PostInitiativeUpdate(ctx context.Context, key string, req PostInitiativeUpdateRequest) (*PostInitiativeUpdateResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp PostInitiativeUpdateResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(key)+"/updates"), req, &resp, req.ClientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkInitiativeUpdates is the update feed, newest first.
+type WorkInitiativeUpdates struct {
+	Updates []WorkInitiativeUpdateView `json:"updates"`
+}
+
+// ListInitiativeUpdates fetches an initiative's update feed.
+func (c *Client) ListInitiativeUpdates(ctx context.Context, key string) (*WorkInitiativeUpdates, error) {
+	var resp WorkInitiativeUpdates
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/initiatives/"+urlSegment(key)+"/updates"), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ArchiveInitiativeResponse mirrors ArchiveWorkInitiativeResponse.
+type ArchiveInitiativeResponse struct {
+	Key      string `json:"key"`
+	Seq      int64  `json:"seq"`
+	Replayed bool   `json:"replayed,omitempty"`
+}
+
+// SetInitiativeArchived archives or unarchives an initiative — a view
+// concern, independent of status (design §1).
+func (c *Client) SetInitiativeArchived(ctx context.Context, key string, archived bool) (*ArchiveInitiativeResponse, error) {
+	action := "/archive"
+	if !archived {
+		action = "/unarchive"
+	}
+	var resp ArchiveInitiativeResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(key)+action), struct{}{}, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AssertTaskDone speaks the assertion lane (POST /work/tasks/{key}/done,
+// design §7.1): note mandatory — an assertion without a reason is a status
+// write. The fold treats it as the weakest voice; live evidence wins.
+func (c *Client) AssertTaskDone(ctx context.Context, key, note, clientToken string) (*WorkMutationResponse, error) {
+	if clientToken == "" {
+		clientToken = newClientToken()
+	}
+	req := struct {
+		Note        string `json:"note"`
+		ClientToken string `json:"clientToken,omitempty"`
+	}{Note: note, ClientToken: clientToken}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/done"), req, &resp, clientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PostTaskNoteRequest mirrors PostWorkTaskNoteRequest — the worklog line
+// (≤280 chars server-side; per-seat clamps answer with typed rate_limited).
+type PostTaskNoteRequest struct {
+	Text        string `json:"text"`
+	Ref         string `json:"ref,omitempty"`
+	ClientToken string `json:"clientToken,omitempty"`
+}
+
+// PostTaskNote appends a worklog note (POST /work/tasks/{key}/note,
+// design §7.2) — fold-inert narration; it moves nothing.
+func (c *Client) PostTaskNote(ctx context.Context, key string, req PostTaskNoteRequest) (*WorkMutationResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/tasks/"+urlSegment(key)+"/note"), req, &resp, req.ClientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkNowOptions filters the live board. Empty fields are omitted.
+type WorkNowOptions struct {
+	Initiative string
+	Epic       string
+	Seat       string
+	Limit      int
+	Cursor     string
+}
+
+// WorkNowLine is the live *now* line: the newest worklog note on a task.
+// Age and the quiet chip derive at read, never stored.
+type WorkNowLine struct {
+	Text  string    `json:"text"`
+	Actor WorkActor `json:"actor"`
+	At    string    `json:"at"`
+	Ref   string    `json:"ref,omitempty"`
+}
+
+// WorkNowRow is one row of the live board: an in-flight task × its latest
+// note × the seat working it.
+type WorkNowRow struct {
+	Key        string       `json:"key"`
+	Title      string       `json:"title"`
+	Rung       string       `json:"rung"`
+	Epic       string       `json:"epic,omitempty"`
+	Initiative string       `json:"initiative,omitempty"`
+	Seat       string       `json:"seat,omitempty"`
+	Now        *WorkNowLine `json:"now,omitempty"`
+	Quiet      bool         `json:"quiet"`
+}
+
+// WorkNow is the live board (WorkNowResponse), cursor-paged.
+type WorkNow struct {
+	Rows       []WorkNowRow `json:"rows"`
+	NextCursor string       `json:"nextCursor,omitempty"`
+}
+
+// GetWorkNow fetches the live board (GET /work/now): what every agent is
+// doing right now, straight from the worklog.
+func (c *Client) GetWorkNow(ctx context.Context, opts WorkNowOptions) (*WorkNow, error) {
+	q := url.Values{}
+	if opts.Initiative != "" {
+		q.Set("initiative", opts.Initiative)
+	}
+	if opts.Epic != "" {
+		q.Set("epic", opts.Epic)
+	}
+	if opts.Seat != "" {
+		q.Set("seat", opts.Seat)
+	}
+	if opts.Limit > 0 {
+		q.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	if opts.Cursor != "" {
+		q.Set("cursor", opts.Cursor)
+	}
+	path := c.workPath("/now")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp WorkNow
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AssignWorkItemRequest mirrors the platform's AssignWorkItemRequest — the
+// generalized assign (any noun; the dispatch gate still applies server-side).
+type AssignWorkItemRequest struct {
+	Subject     string `json:"subject"`
+	Unassign    bool   `json:"unassign,omitempty"`
+	Override    string `json:"override,omitempty"`
+	ClientToken string `json:"clientToken,omitempty"`
+}
+
+// AssignWorkItem assigns a membership subject to any noun — designs, epics,
+// initiatives (owner), tasks — through POST /work/items/{key}/assign. The
+// token flows (forward-compatible), but the write stays off the retry lane
+// until the assign handler replays by token server-side.
+func (c *Client) AssignWorkItem(ctx context.Context, key string, req AssignWorkItemRequest) (*WorkMutationResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/items/"+urlSegment(key)+"/assign"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── The v4 decision endpoints that never had clients (review, verdict,
+// approval, adoption). All shipped server-side with orun-work-v4; IS4 puts
+// them on this seam so the MCP and CLI can reach them. The human-only actor
+// rules live in the model layer server-side — these clients carry the typed
+// human_only verdict back verbatim (IN-4). No clientToken on these bodies
+// (the v4 contracts carry none), so no transport retry either.
+
+// ReviewCollectionOf picks the wire collection a review/verdict rides for a
+// key: design keys (typed `…-D<n>`, legacy `DSG-<n>`, machine `dsg_…`) go to
+// /work/designs, everything else to /work/epics. Best-effort by grammar —
+// the server resolves the key itself; the segment only has to route.
+func ReviewCollectionOf(key string) string {
+	if strings.HasPrefix(key, "dsg_") || strings.HasPrefix(key, "DSG-") {
+		return "designs"
+	}
+	if i := strings.LastIndex(key, "-D"); i > 0 && i+2 < len(key) {
+		digits := key[i+2:]
+		allDigits := true
+		for _, r := range digits {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return "designs"
+		}
+	}
+	return "epics"
+}
+
+// workCollection validates the collection segment a review/verdict path
+// rides ("epics", "specs", or "designs" — the route accepts all three).
+func workCollection(collection string) (string, error) {
+	switch collection {
+	case "epics", "specs", "designs":
+		return collection, nil
+	case "":
+		return "epics", nil
+	default:
+		return "", fmt.Errorf("remotestate: unknown work collection %q (epics|specs|designs)", collection)
+	}
+}
+
+// WorkReviewRequest mirrors the platform's WorkReviewRequest.
+type WorkReviewRequest struct {
+	Revision  string   `json:"revision,omitempty"`
+	Reviewers []string `json:"reviewers,omitempty"`
+	Note      string   `json:"note,omitempty"`
+}
+
+// RequestWorkReview requests review on an epic or a design
+// (POST /work/{collection}/{key}/review).
+func (c *Client) RequestWorkReview(ctx context.Context, collection, key string, req WorkReviewRequest) (*WorkMutationResponse, error) {
+	col, err := workCollection(collection)
+	if err != nil {
+		return nil, err
+	}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/"+col+"/"+urlSegment(key)+"/review"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkVerdictRequest mirrors the platform's WorkVerdictRequest — an opinion
+// (approve | request_changes), not a decision.
+type WorkVerdictRequest struct {
+	Revision string `json:"revision,omitempty"`
+	Verdict  string `json:"verdict"`
+	Note     string `json:"note,omitempty"`
+}
+
+// SubmitWorkVerdict submits a review verdict
+// (POST /work/{collection}/{key}/verdict).
+func (c *Client) SubmitWorkVerdict(ctx context.Context, collection, key string, req WorkVerdictRequest) (*WorkMutationResponse, error) {
+	col, err := workCollection(collection)
+	if err != nil {
+		return nil, err
+	}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/"+col+"/"+urlSegment(key)+"/verdict"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ApproveEpicRequest mirrors ApproveWorkEpicRequest.
+type ApproveEpicRequest struct {
+	Revision     string `json:"revision,omitempty"`
+	MinApprovals int    `json:"minApprovals,omitempty"`
+}
+
+// ApproveEpicResponse carries the sealed EpicSnapshot's content id — the
+// approval IS the dispatch artifact.
+type ApproveEpicResponse struct {
+	Key      string `json:"key"`
+	Seq      int64  `json:"seq"`
+	Snapshot string `json:"snapshot"`
+}
+
+// ApproveEpic approves an epic at a revision (POST /work/epics/{key}/approve).
+// Human-only server-side; an sp_ seat gets the typed human_only verdict.
+func (c *Client) ApproveEpic(ctx context.Context, key string, req ApproveEpicRequest) (*ApproveEpicResponse, error) {
+	var resp ApproveEpicResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(key)+"/approve"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// RevokeEpicApproval revokes an epic's approval
+// (POST /work/epics/{key}/revoke-approval).
+func (c *Client) RevokeEpicApproval(ctx context.Context, key, note string) (*WorkMutationResponse, error) {
+	req := struct {
+		Note string `json:"note,omitempty"`
+	}{Note: note}
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(key)+"/revoke-approval"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AdoptDesignRequest mirrors AdoptWorkDesignRequest — the subset of proposal
+// epics to mint (default all) and the task-key prefix for skeletons.
+type AdoptDesignRequest struct {
+	Epics      []string `json:"epics,omitempty"`
+	TaskPrefix string   `json:"taskPrefix,omitempty"`
+}
+
+// AdoptDesignResponse names what adoption minted.
+type AdoptDesignResponse struct {
+	Key    string   `json:"key"`
+	Seq    int64    `json:"seq"`
+	Minted []string `json:"minted"`
+	Tasks  []string `json:"tasks"`
+}
+
+// AdoptDesign adopts a design (POST /work/designs/{key}/adopt) — mints the
+// structure and approves the minted epics at rev 0, one transaction, one
+// signature. Human-only server-side.
+func (c *Client) AdoptDesign(ctx context.Context, key string, req AdoptDesignRequest) (*AdoptDesignResponse, error) {
+	var resp AdoptDesignResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/designs/"+urlSegment(key)+"/adopt"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SupersedeDesignRequest mirrors SupersedeWorkDesignRequest.
+type SupersedeDesignRequest struct {
+	By   string `json:"by,omitempty"`
+	Note string `json:"note,omitempty"`
+}
+
+// SupersedeDesign supersedes a design (POST /work/designs/{key}/supersede).
+func (c *Client) SupersedeDesign(ctx context.Context, key string, req SupersedeDesignRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/designs/"+urlSegment(key)+"/supersede"), req, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil

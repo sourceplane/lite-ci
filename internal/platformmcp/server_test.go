@@ -516,8 +516,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 46 {
-		t.Fatalf("merged roster = %d tools, want 46 (21 work + 25 platform — IN5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 60 {
+		t.Fatalf("merged roster = %d tools, want 60 (35 work + 25 platform — IS4)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -546,7 +546,7 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (46 → 40); the 21 work tools stay — they are mutator-shaped by
+// writes (60 → 54); the 35 work tools stay — they are mutator-shaped by
 // WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
 // blocked at execution too, not just delisted.
 func TestComposedServerReadOnly(t *testing.T) {
@@ -574,8 +574,8 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 40 {
-		t.Fatalf("read-only roster = %d tools, want 40 (21 work + 19 platform reads — IN5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 54 {
+		t.Fatalf("read-only roster = %d tools, want 54 (35 work + 19 platform reads — IS4)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
@@ -583,15 +583,16 @@ func TestComposedServerReadOnly(t *testing.T) {
 			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") ||
 			strings.HasPrefix(tool.Name, "epic_") || strings.HasPrefix(tool.Name, "design_") ||
 			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") ||
-			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") {
+			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") ||
+			strings.HasPrefix(tool.Name, "item_") || strings.HasPrefix(tool.Name, "review_") {
 			workCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 21 {
-		t.Errorf("work tools under --read-only = %d, want 21 (mutator-shaped, unaffected — IN5)", workCount)
+	if workCount != 35 {
+		t.Errorf("work tools under --read-only = %d, want 35 (mutator-shaped, unaffected — IS4)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -662,4 +663,51 @@ func (workFake) CreateInitiative(_ context.Context, req remotestate.CreateWorkIn
 }
 func (workFake) UpsertMilestones(_ context.Context, epicKey string, _ remotestate.WorkMilestoneRequest) (*remotestate.WorkMutationResponse, error) {
 	return &remotestate.WorkMutationResponse{Key: epicKey}, nil
+}
+
+// orun-initiatives-v2 (IS4) — the grown WorkAPI legs, canned.
+func (workFake) GetWorkItem(_ context.Context, ref string) (*remotestate.WorkItemResolve, error) {
+	return &remotestate.WorkItemResolve{Key: ref, CanonicalKey: ref, Kind: "task"}, nil
+}
+func (workFake) GetWorkContext(_ context.Context, ref string, _ remotestate.WorkContextOptions) (*remotestate.WorkContext, error) {
+	return &remotestate.WorkContext{Item: remotestate.WorkContextItem{Key: ref, CanonicalKey: ref, Kind: "task"}}, nil
+}
+func (workFake) GetWorkNow(context.Context, remotestate.WorkNowOptions) (*remotestate.WorkNow, error) {
+	return &remotestate.WorkNow{}, nil
+}
+func (workFake) ListInitiativeUpdates(context.Context, string) (*remotestate.WorkInitiativeUpdates, error) {
+	return &remotestate.WorkInitiativeUpdates{}, nil
+}
+func (workFake) SetInitiativeStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
+	return &remotestate.SetInitiativeStatusResponse{Key: key, Status: req.To}, nil
+}
+func (workFake) PostInitiativeUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostInitiativeUpdateResponse, error) {
+	return &remotestate.PostInitiativeUpdateResponse{Key: key, Update: remotestate.WorkInitiativeUpdateView{Health: req.Health}}, nil
+}
+func (workFake) AssertTaskDone(_ context.Context, key, _, _ string) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) PostTaskNote(_ context.Context, key string, _ remotestate.PostTaskNoteRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) AssignWorkItem(_ context.Context, key string, _ remotestate.AssignWorkItemRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) RequestWorkReview(_ context.Context, _, key string, _ remotestate.WorkReviewRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) SubmitWorkVerdict(_ context.Context, _, key string, _ remotestate.WorkVerdictRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) ApproveEpic(_ context.Context, key string, _ remotestate.ApproveEpicRequest) (*remotestate.ApproveEpicResponse, error) {
+	return &remotestate.ApproveEpicResponse{Key: key}, nil
+}
+func (workFake) RevokeEpicApproval(_ context.Context, key, _ string) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+func (workFake) AdoptDesign(_ context.Context, key string, _ remotestate.AdoptDesignRequest) (*remotestate.AdoptDesignResponse, error) {
+	return &remotestate.AdoptDesignResponse{Key: key}, nil
+}
+func (workFake) SupersedeDesign(_ context.Context, key string, _ remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	return &remotestate.WorkMutationResponse{Key: key}, nil
 }
