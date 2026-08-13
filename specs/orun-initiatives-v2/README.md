@@ -40,7 +40,10 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
    v4 endpoints that never had them (`RequestWorkReview`,
    `SubmitWorkVerdict`, `ApproveEpic`, `RevokeEpicApproval`,
    `AdoptDesign`, `SupersedeDesign`). Reads retryable, writes not, as
-   everywhere.
+   everywhere; the three hot reads (`yours`/`now`/`activity`) support
+   the IS-Q bounded long-poll (`after` + `waitSeconds ≤ 25`), and
+   property edits send `ifSeq` by default (409 on a lost race, legible
+   retry).
 2. **The work MCP grows 21 → 37 under tiers** (`internal/workmcp`):
    `work_context`, `work_now`, `work_yours` (the addressed personal
    queue), `initiative_updates_get` (reads);
@@ -101,6 +104,10 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
    verdicts on the shared fixtures.
 6. `orun spec pull` / `orun epic pull` accept typed keys and slugs alike
    (alias resolution), byte-identical output for byte-identical inputs.
+7. CLI rendering obeys the IS-O chip language: every state word prints
+   with its source badge (`signed/authored/derived/asserted`) — the
+   existing rung-ladder and intent-chip renderers grow the badge, no
+   chip prints bare.
 
 ## Read order
 
