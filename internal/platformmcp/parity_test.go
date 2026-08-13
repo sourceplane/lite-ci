@@ -3,6 +3,7 @@ package platformmcp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,8 +17,12 @@ import (
 
 // The anti-drift contract (design §4): the vendored manifest exported from
 // the TS plane pins this package's roster. These tests fail on any name /
-// description / schema / annotation drift — over the full 25-tool roster
+// description / schema / annotation drift — over the whole advertised roster
 // since UM2 (reads and writes alike).
+//
+// The manifest carries 29 tools; 4 are ceded to the native work plane
+// (cededToWorkPlane), so this plane advertises 25. Parity is asserted over
+// the advertised subset, and the ceded names get their own assertions below.
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -104,9 +109,9 @@ func canon(t *testing.T, v interface{}) string {
 }
 
 // TestManifestParity asserts the advertised roster equals the vendored
-// manifest, tool for tool: count, order, names, descriptions, titles,
-// annotations, and normalized inputSchemas — the full 25 (UM2), and the
-// readOnlyHint:true 19 under ReadOnly.
+// manifest's unceded tools, tool for tool: count, order, names,
+// descriptions, titles, annotations, and normalized inputSchemas — 25 of the
+// manifest's 29, and the readOnlyHint:true 19 of those under ReadOnly.
 func TestManifestParity(t *testing.T) {
 	var m manifest
 	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
@@ -115,21 +120,36 @@ func TestManifestParity(t *testing.T) {
 	if m.ToolCount != len(m.Tools) {
 		t.Fatalf("manifest toolCount %d != %d tools", m.ToolCount, len(m.Tools))
 	}
-	if len(m.Tools) != 25 {
-		t.Fatalf("UM2 expects 25 tools, manifest carries %d", len(m.Tools))
+	if len(m.Tools) != 29 {
+		t.Fatalf("IN9 expects 29 tools in the manifest, it carries %d", len(m.Tools))
 	}
 
-	var wantReads []manifestTool
+	var manifestReads int
+	var wantAll, wantReads []manifestTool
 	for _, tool := range m.Tools {
-		if ro, _ := tool.Annotations["readOnlyHint"].(bool); ro {
+		ro, _ := tool.Annotations["readOnlyHint"].(bool)
+		if ro {
+			manifestReads++
+		}
+		if cededToWorkPlane[tool.Name] {
+			continue
+		}
+		wantAll = append(wantAll, tool)
+		if ro {
 			wantReads = append(wantReads, tool)
 		}
 	}
-	if len(wantReads) != m.ReadOnlyToolCount {
-		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, len(wantReads))
+	if manifestReads != m.ReadOnlyToolCount {
+		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, manifestReads)
+	}
+	if manifestReads != 23 {
+		t.Fatalf("IN9 expects 23 read tools in the manifest, it carries %d", manifestReads)
+	}
+	if len(wantAll) != 25 {
+		t.Fatalf("UM2 expects 25 advertised tools after ceding, got %d", len(wantAll))
 	}
 	if len(wantReads) != 19 {
-		t.Fatalf("UM2 expects 19 read tools, manifest carries %d", len(wantReads))
+		t.Fatalf("UM2 expects 19 advertised read tools after ceding, got %d", len(wantReads))
 	}
 
 	for _, tc := range []struct {
@@ -138,7 +158,7 @@ func TestManifestParity(t *testing.T) {
 		want []manifestTool
 	}{
 		// no default workspace: schemas must be the manifest's, verbatim
-		{"full", (&Provider{}).Tools(), m.Tools},
+		{"full", (&Provider{}).Tools(), wantAll},
 		{"read-only", (&Provider{ReadOnly: true}).Tools(), wantReads},
 	} {
 		if len(tc.got) != len(tc.want) {
@@ -165,6 +185,60 @@ func TestManifestParity(t *testing.T) {
 			if canon(t, g.InputSchema) != canon(t, wantSchema) {
 				t.Errorf("%s: inputSchema drifted:\n got  %s\n want %s", w.Name, canon(t, g.InputSchema), canon(t, wantSchema))
 			}
+		}
+	}
+}
+
+// TestCededNamesResolveInTheManifest is the staleness guard on
+// cededToWorkPlane: every entry must still name a tool the vendored manifest
+// carries. A re-vendor that renames or drops one of the four leaves a dead
+// entry that silently cedes nothing — caught here rather than at serve time.
+func TestCededNamesResolveInTheManifest(t *testing.T) {
+	var m manifest
+	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
+		t.Fatalf("parse vendored manifest: %v", err)
+	}
+	inManifest := map[string]bool{}
+	for _, tool := range m.Tools {
+		inManifest[tool.Name] = true
+	}
+	for name := range cededToWorkPlane {
+		if !inManifest[name] {
+			t.Errorf("cededToWorkPlane names %q, which the vendored manifest no longer carries — drop the entry", name)
+		}
+	}
+	if len(cededToWorkPlane) != 4 {
+		t.Errorf("cededToWorkPlane holds %d names, want the 4 work-plane reads", len(cededToWorkPlane))
+	}
+}
+
+// TestCededToolsAreNeitherAdvertisedNorOwned: the four work-plane reads are
+// absent from both rosters and disowned by Call, so mcpserve routes them to
+// internal/workmcp instead of this plane answering "unknown tool". Ceding
+// them is also what keeps mcpserve.checkRoster from rejecting the composed
+// server outright — the two planes would otherwise share four names.
+func TestCededToolsAreNeitherAdvertisedNorOwned(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		p    *Provider
+	}{
+		{"full", &Provider{}},
+		{"read-only", &Provider{ReadOnly: true}},
+		{"with-default-workspace", &Provider{DefaultWorkspace: "ws_ambient"}},
+	} {
+		for _, tool := range mode.p.Tools() {
+			if cededToWorkPlane[tool.Name] {
+				t.Errorf("%s: %s is ceded to the work plane but still advertised", mode.name, tool.Name)
+			}
+		}
+	}
+
+	// Disowned at dispatch: owned=false is what lets the composed server fall
+	// through to the work provider.
+	p := &Provider{}
+	for name := range cededToWorkPlane {
+		if _, owned := p.Call(context.Background(), name, nil); owned {
+			t.Errorf("%s: Call claims ownership of a ceded tool", name)
 		}
 	}
 }

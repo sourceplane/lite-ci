@@ -66,7 +66,7 @@
     }
   ],
   "protocolRevision": "2025-06-18",
-  "readOnlyToolCount": 19,
+  "readOnlyToolCount": 23,
   "resources": [
     {
       "description": "One catalog entity as markdown: identity, owner, relations, provenance, doc index, and the overview doc body (byte-capped). `entityKey` is base64url(entityRef). The agent-facing twin of the entity page; use `catalog_search` to find refs.",
@@ -83,7 +83,7 @@
   ],
   "serverName": "orun-cloud",
   "source": "@saas/mcp",
-  "toolCount": 25,
+  "toolCount": 29,
   "tools": [
     {
       "annotations": {
@@ -914,6 +914,134 @@
       },
       "name": "webhook_deliveries_list",
       "title": "List webhook deliveries"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "The work-plane portfolio in one read: every initiative with DERIVED status (planning until the first approved epic, the health fold afterwards), progress arithmetic (done/active/total), needs-you reasons waiting on a human, agent assignees, epic rows with intent state, design rows, plus workspace fold-stats. Nothing returned is a stored status. Drill in with `initiative_tree`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "initiatives_list",
+      "title": "List initiatives (the portfolio)"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "One initiative's full hierarchy — the world to plan against: epics with intent state and approved revision (drift named), milestones with derived state (complete/active/upcoming) and progress, tasks with rungs and delivery evidence, docs with revisions and open threads, and the initiative's design runs. Keys come from `initiatives_list`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "Initiative key (from `initiatives_list`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "initiative_tree",
+      "title": "Get an initiative's full tree"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "One task's whole page: the task view (derived rung with evidence, contract, pins), its ancestry (initiative/epic/milestone), the folded delivery evidence (branch, PR, checks), components affected (observation diffstats — empty when the world reported none, never invented), and the task-scoped activity tail, newest first.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "Task key (e.g. TSK-141, from `initiative_tree`).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "task_get",
+      "title": "Get a task with its evidence"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "The tagged activity tail for any work-plane noun: both logs folded into one reverse-chronological list of neutral server sentences. The tag trail is ancestry — filtering by an epic covers its milestones' tasks, docs, and designs; an initiative covers its whole subtree. Omit `tag` for the workspace-wide tail; page with `cursor`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque continuation cursor from a previous page's `meta.cursor`; pass back verbatim.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size (the server clamps to its own bounds).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tag": {
+            "description": "Item key to filter by, ancestry included (e.g. INI-7 or EP-14).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "activity_get",
+      "title": "Read tagged work activity"
     },
     {
       "annotations": {
