@@ -44,7 +44,54 @@ func (e CoordinationEvent) Validate() error {
 	if IsHumanOnlyEventKind(e.Kind) && e.Actor.Type != ActorUser {
 		return fmt.Errorf("worklens: %s is a human-only decision — actor type %q may not author it (V4-2)", e.Kind, e.Actor.Type)
 	}
+	// IS2 (IS-4): status_changed is payload-conditionally signature-bearing —
+	// entering or leaving completed/canceled is a decision only a person may
+	// author; start/pause/resume stay open to attributed agents.
+	if e.Kind == EventStatusChanged && e.Actor.Type != ActorUser {
+		var p StatusChangedPayload
+		if err := json.Unmarshal(e.Payload, &p); err == nil && p.From != "" && p.To != "" {
+			if InitiativeMoveIsHumanOnly(p.From, p.To) {
+				return fmt.Errorf("worklens: status_changed %s → %s is a human-only decision — actor type %q may not author it (IS-4)", p.From, p.To, e.Actor.Type)
+			}
+		}
+	}
+	// IS3 (design §7.1): an assertion without a reason is a status write.
+	if e.Kind == EventDoneAsserted {
+		var p DoneAssertedPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil || p.Note == "" {
+			return fmt.Errorf("worklens: done_asserted on %s needs a note — say why the work is done (design §7.1)", e.Subject)
+		}
+	}
 	return nil
+}
+
+// StatusChangedPayload is the payload of a status_changed event (IS2,
+// design §1) — the initiative lifecycle stage moving.
+type StatusChangedPayload struct {
+	From    InitiativeState `json:"from"`
+	To      InitiativeState `json:"to"`
+	Comment string          `json:"comment,omitempty"`
+	Force   bool            `json:"force,omitempty"`
+}
+
+// UpdatePostedPayload is the payload of update_posted (IS2, design §2) —
+// health is the headline of the latest posted update.
+type UpdatePostedPayload struct {
+	Update string `json:"update"` // upd_<ulid>
+	Health Health `json:"health"`
+	Body   string `json:"body"`
+}
+
+// DoneAssertedPayload is the payload of done_asserted (IS3, design §7.1).
+type DoneAssertedPayload struct {
+	Note string `json:"note"`
+}
+
+// ProgressNotedPayload is the payload of progress_noted (IS3, design §7.2)
+// — the worklog line. INERT to every fold (IS-8).
+type ProgressNotedPayload struct {
+	Text string `json:"text"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 // RelationPayload is the payload of related/unrelated events (v3 PM2).

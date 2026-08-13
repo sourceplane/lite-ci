@@ -245,8 +245,11 @@ func TestV4VocabularyAndGuards(t *testing.T) {
 	// The coordination vocabulary grows 19 → 27 (design §1.3); the
 	// observation vocabulary is frozen (V4-1); there is still no
 	// delivery-lifecycle-write kind.
-	if got := len(EventKinds); got != 27 {
-		t.Fatalf("EventKinds = %d, want 27", got)
+	// 27 → 34 with IS2/IS3 (orun-initiatives-v2): the five state/update/
+	// archive kinds plus the agent's-voice pair, all speech acts — still
+	// no task-rung write (the narrowed WP-3, pinned in model_test.go).
+	if got := len(EventKinds); got != 34 {
+		t.Fatalf("EventKinds = %d, want 34", got)
 	}
 	if got := len(ObservationKinds); got != 6 {
 		t.Fatalf("ObservationKinds = %d, want 6 (frozen — V4-1)", got)

@@ -98,6 +98,20 @@ const (
 	EventApprovalRevoked EventKind = "approval_revoked"
 	EventDesignAdopted   EventKind = "design_adopted"
 	EventSuperseded      EventKind = "superseded"
+
+	// IS2/IS3 (orun-initiatives-v2 design §12) — 27 → 34. The doctrine
+	// narrows deliberately: WP-3 becomes "no stored DELIVERY status". An
+	// initiative's lifecycle STAGE and HEALTH are speech acts — authored
+	// kinds — while the delivery fold reads exactly ONE of these
+	// (done_asserted, as the weakest voice) and progress_noted is INERT
+	// everywhere (IS-8). Still no task-rung write kind.
+	EventStatusChanged EventKind = "status_changed" // {from, to, comment?, force?} — terminal moves HUMAN-ONLY (IS-4)
+	EventUpdatePosted  EventKind = "update_posted"  // {update, health, body} — the health headline (design §2)
+	EventUpdateEdited  EventKind = "update_edited"  // {update, health?, body?}
+	EventArchived      EventKind = "archived"       // {} — a view concern, never a status
+	EventUnarchived    EventKind = "unarchived"     // {}
+	EventDoneAsserted  EventKind = "done_asserted"  // {note} — the assertion lane (design §7.1)
+	EventProgressNoted EventKind = "progress_noted" // {text, ref?} — the worklog; INERT to every fold (IS-8)
 )
 
 // EventKinds enumerates the closed set in a stable order.
@@ -111,6 +125,9 @@ var EventKinds = []EventKind{
 	EventMilestoneEdited, EventMilestoneSet, EventReviewRequested,
 	EventReviewSubmitted, EventApproved, EventApprovalRevoked,
 	EventDesignAdopted, EventSuperseded,
+	EventStatusChanged, EventUpdatePosted, EventUpdateEdited,
+	EventArchived, EventUnarchived,
+	EventDoneAsserted, EventProgressNoted,
 }
 
 // HumanOnlyEventKinds are the decisions only a person may author (V4-2):
@@ -243,4 +260,46 @@ var healthOrder = map[Health]int{
 func HealthIndex(h Health) (int, bool) {
 	i, ok := healthOrder[h]
 	return i, ok
+}
+
+// InitiativeState is the STORED initiative lifecycle stage (IS2,
+// orun-initiatives-v2 design §1): a five-state machine, six named
+// transitions, closed. Status is a speech act, not a measurement (health)
+// and not arithmetic (progress) — and it is the one stored stage the
+// narrowed WP-3 permits ("no stored DELIVERY status").
+type InitiativeState string
+
+const (
+	InitiativePlanning  InitiativeState = "planning"
+	InitiativeActive    InitiativeState = "active"
+	InitiativePaused    InitiativeState = "paused"
+	InitiativeCompleted InitiativeState = "completed"
+	InitiativeCanceled  InitiativeState = "canceled"
+)
+
+// initiativeMoves are the legal transitions (design §1):
+// planning → active (start) · active ⇄ paused (pause/resume) ·
+// active → completed (complete) · planning/active/paused → canceled
+// (cancel) · completed → active (reopen) · canceled → planning (restore).
+var initiativeMoves = map[InitiativeState][]InitiativeState{
+	InitiativePlanning:  {InitiativeActive, InitiativeCanceled},
+	InitiativeActive:    {InitiativePaused, InitiativeCompleted, InitiativeCanceled},
+	InitiativePaused:    {InitiativeActive, InitiativeCanceled},
+	InitiativeCompleted: {InitiativeActive},
+	InitiativeCanceled:  {InitiativePlanning},
+}
+
+// AllowedInitiativeTransitions returns the legal next states from `from` —
+// the 409 verdict carries exactly this list (the API teaches its own
+// machine).
+func AllowedInitiativeTransitions(from InitiativeState) []InitiativeState {
+	return initiativeMoves[from]
+}
+
+// InitiativeMoveIsHumanOnly reports whether the from→to move is a
+// signature-bearing decision (IS-4): entering or leaving a terminal state
+// is human-only, exactly like approve/adopt.
+func InitiativeMoveIsHumanOnly(from, to InitiativeState) bool {
+	return to == InitiativeCompleted || to == InitiativeCanceled ||
+		from == InitiativeCompleted || from == InitiativeCanceled
 }
