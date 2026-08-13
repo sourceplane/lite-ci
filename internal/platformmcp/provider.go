@@ -43,6 +43,10 @@ type PlatformAPI interface {
 	ListSecretsMetadata(ctx context.Context, scope remotestate.ConfigScope) (*remotestate.PlatformPage, error)
 	ListWebhookEndpoints(ctx context.Context, org string, opts remotestate.PageQuery) (*remotestate.PlatformPage, error)
 	ListWebhookDeliveries(ctx context.Context, org, endpoint string, opts remotestate.PageQuery) (*remotestate.PlatformPage, error)
+	// Skills (orun-initiatives-v2 IS5) — sealed, hosted policy; reads only
+	// (publishing is work.approve and stays with the console and CLI).
+	ListSkills(ctx context.Context, org string) (*remotestate.SkillsList, error)
+	GetSkill(ctx context.Context, org, name, rev string) (*remotestate.SkillView, error)
 
 	// Writes (UM2): each carries the per-attempt Idempotency-Key.
 	CreateProject(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
@@ -508,6 +512,29 @@ func (p *Provider) call(ctx context.Context, name string, a argmap) (string, err
 			return "", err
 		}
 		return emitPage("secret metadata at "+scopeName+" scope (values are write-only platform-wide)", page)
+
+	case "skills_list":
+		skills, err := p.API.ListSkills(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		org := 0
+		for _, s := range skills.Skills {
+			if s.Source == "org" {
+				org++
+			}
+		}
+		return emit(fmt.Sprintf("%d skill(s) — %d org-published, %d default", len(skills.Skills), org, len(skills.Skills)-org), skills)
+
+	case "skill_get":
+		if err := requireStr(a, name, "name"); err != nil {
+			return "", err
+		}
+		view, err := p.API.GetSkill(ctx, ws, a.str("name"), a.str("rev"))
+		if err != nil {
+			return "", err
+		}
+		return emit(view.Name+" @ "+truncate(view.Rev)+" ("+view.Source+")", view)
 
 	case "webhook_deliveries_list":
 		if endpoint := a.str("endpoint"); endpoint != "" {

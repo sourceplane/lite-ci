@@ -128,6 +128,31 @@ func (f *fakeAPI) ListSecretsMetadata(_ context.Context, s remotestate.ConfigSco
 func (f *fakeAPI) ListWebhookEndpoints(_ context.Context, org string, q remotestate.PageQuery) (*remotestate.PlatformPage, error) {
 	return f.rec("ListWebhookEndpoints org=%s cursor=%s", org, q.Cursor)
 }
+func (f *fakeAPI) ListSkills(_ context.Context, org string) (*remotestate.SkillsList, error) {
+	f.calls = append(f.calls, fmt.Sprintf("ListSkills org=%s", org))
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &remotestate.SkillsList{Skills: []remotestate.Skill{
+		{Name: "milestone-loop", Rev: "sha256:aa", Source: "org", Frontmatter: map[string]interface{}{"title": "The milestone loop"}},
+		{Name: "pr-provenance", Rev: "sha256:bb", Source: "default", Frontmatter: map[string]interface{}{}},
+	}}, nil
+}
+func (f *fakeAPI) GetSkill(_ context.Context, org, name, rev string) (*remotestate.SkillView, error) {
+	f.calls = append(f.calls, fmt.Sprintf("GetSkill org=%s name=%s rev=%s", org, name, rev))
+	if f.err != nil {
+		return nil, f.err
+	}
+	view := &remotestate.SkillView{Body: "# " + name + "\n"}
+	view.Name = name
+	view.Rev = "sha256:cc"
+	if rev != "" {
+		view.Rev = rev
+	}
+	view.Source = "default"
+	view.Frontmatter = map[string]interface{}{}
+	return view, nil
+}
 func (f *fakeAPI) ListWebhookDeliveries(_ context.Context, org, endpoint string, q remotestate.PageQuery) (*remotestate.PlatformPage, error) {
 	return f.rec("ListWebhookDeliveries org=%s endpoint=%s cursor=%s", org, endpoint, q.Cursor)
 }
@@ -516,8 +541,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 61 {
-		t.Fatalf("merged roster = %d tools, want 61 (36 work + 25 platform — IS4+IS2b)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 63 {
+		t.Fatalf("merged roster = %d tools, want 63 (36 work + 27 platform — IS5)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -546,7 +571,7 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (61 → 55); the 36 work tools stay — they are mutator-shaped by
+// writes (63 → 57); the 36 work tools stay — they are mutator-shaped by
 // WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
 // blocked at execution too, not just delisted.
 func TestComposedServerReadOnly(t *testing.T) {
@@ -574,8 +599,8 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 55 {
-		t.Fatalf("read-only roster = %d tools, want 55 (36 work + 19 platform reads — IS4+IS2b)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 57 {
+		t.Fatalf("read-only roster = %d tools, want 57 (36 work + 21 platform reads — IS5)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {

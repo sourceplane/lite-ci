@@ -20,8 +20,8 @@ import (
 // description / schema / annotation drift — over the whole advertised roster
 // since UM2 (reads and writes alike).
 //
-// The manifest carries 29 tools; 4 are ceded to the native work plane
-// (cededToWorkPlane), so this plane advertises 25. Parity is asserted over
+// The manifest carries 31 tools; 4 are ceded to the native work plane
+// (cededToWorkPlane), so this plane advertises 27. Parity is asserted over
 // the advertised subset, and the ceded names get their own assertions below.
 
 func repoRoot(t *testing.T) string {
@@ -110,8 +110,8 @@ func canon(t *testing.T, v interface{}) string {
 
 // TestManifestParity asserts the advertised roster equals the vendored
 // manifest's unceded tools, tool for tool: count, order, names,
-// descriptions, titles, annotations, and normalized inputSchemas — 25 of the
-// manifest's 29, and the readOnlyHint:true 19 of those under ReadOnly.
+// descriptions, titles, annotations, and normalized inputSchemas — 27 of the
+// manifest's 31, and the readOnlyHint:true 21 of those under ReadOnly.
 func TestManifestParity(t *testing.T) {
 	var m manifest
 	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
@@ -120,8 +120,8 @@ func TestManifestParity(t *testing.T) {
 	if m.ToolCount != len(m.Tools) {
 		t.Fatalf("manifest toolCount %d != %d tools", m.ToolCount, len(m.Tools))
 	}
-	if len(m.Tools) != 29 {
-		t.Fatalf("IN9 expects 29 tools in the manifest, it carries %d", len(m.Tools))
+	if len(m.Tools) != 31 {
+		t.Fatalf("IS5 expects 31 tools in the manifest, it carries %d", len(m.Tools))
 	}
 
 	var manifestReads int
@@ -142,14 +142,14 @@ func TestManifestParity(t *testing.T) {
 	if manifestReads != m.ReadOnlyToolCount {
 		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, manifestReads)
 	}
-	if manifestReads != 23 {
-		t.Fatalf("IN9 expects 23 read tools in the manifest, it carries %d", manifestReads)
+	if manifestReads != 25 {
+		t.Fatalf("IS5 expects 25 read tools in the manifest, it carries %d", manifestReads)
 	}
-	if len(wantAll) != 25 {
-		t.Fatalf("UM2 expects 25 advertised tools after ceding, got %d", len(wantAll))
+	if len(wantAll) != 27 {
+		t.Fatalf("UM2 expects 27 advertised tools after ceding, got %d", len(wantAll))
 	}
-	if len(wantReads) != 19 {
-		t.Fatalf("UM2 expects 19 advertised read tools after ceding, got %d", len(wantReads))
+	if len(wantReads) != 21 {
+		t.Fatalf("UM2 expects 21 advertised read tools after ceding, got %d", len(wantReads))
 	}
 
 	for _, tc := range []struct {
