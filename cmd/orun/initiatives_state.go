@@ -565,6 +565,63 @@ moves no rung, feeds no health, triggers nothing. Clamped per seat
 	return cmd
 }
 
+// ── yours — the addressed personal queue ─────────────────────────────────────
+
+func newInitiativesYoursCommand() *cobra.Command {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+		limit      int
+		cursor     string
+	)
+	cmd := &cobra.Command{
+		Use:   "yours",
+		Short: "Your addressed queue: everything that waits on you, one list",
+		Long: `The daily driver (AttentionItem v1): drifted approvals you signed, reviews
+requested of you, idle milestones you own — newest-decision-first, each item
+carrying the one gesture that clears it. There is no second inbox.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := workClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			queue, err := client.GetWorkYours(cmd.Context(), remotestate.WorkYoursOptions{
+				Limit: limit, Cursor: cursor,
+			})
+			if err != nil {
+				return fmt.Errorf("orun initiatives yours: %w", err)
+			}
+			if asJSON {
+				return encodeJSON(cmd, queue)
+			}
+			if len(queue.Items) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "(nothing waits on you)")
+				return nil
+			}
+			rows := make([][]string, 0, len(queue.Items))
+			for _, item := range queue.Items {
+				act := item.Act.Tool
+				if act == "" {
+					act = item.Act.URL
+				}
+				rows = append(rows, []string{item.Since, item.Kind, item.Subject.Key, item.Reason, act})
+			}
+			out := renderColumns([]string{"SINCE", "KIND", "SUBJECT", "REASON", "ACT"}, rows)
+			if queue.NextCursor != "" {
+				out += fmt.Sprintf("\nmore: re-run with --cursor %s\n", queue.NextCursor)
+			}
+			fmt.Fprint(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum items")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from a prior page's cursor")
+	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	return cmd
+}
+
 // ── now — the live board ─────────────────────────────────────────────────────
 
 func newInitiativesNowCommand() *cobra.Command {

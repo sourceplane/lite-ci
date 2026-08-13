@@ -49,6 +49,7 @@ speech act now; task rungs stay derived):
   review    request | verdict — eyes and opinions on epics and designs
   adopt     Adopt a design (interactive confirm = the signature)
   now       The live board: in-flight tasks × latest worklog note × seat
+  yours     Your addressed queue: everything that waits on you, one list
 
 Run 'orun initiatives <subcommand> --help' for details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,6 +78,7 @@ Run 'orun initiatives <subcommand> --help' for details.`,
 	cmd.AddCommand(newInitiativesReviewCommand())
 	cmd.AddCommand(newInitiativesAdoptCommand())
 	cmd.AddCommand(newInitiativesNowCommand())
+	cmd.AddCommand(newInitiativesYoursCommand())
 	root.AddCommand(cmd)
 }
 

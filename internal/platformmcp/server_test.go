@@ -516,8 +516,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 60 {
-		t.Fatalf("merged roster = %d tools, want 60 (35 work + 25 platform — IS4)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 61 {
+		t.Fatalf("merged roster = %d tools, want 61 (36 work + 25 platform — IS4+IS2b)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -546,7 +546,7 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (60 → 54); the 35 work tools stay — they are mutator-shaped by
+// writes (61 → 55); the 36 work tools stay — they are mutator-shaped by
 // WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
 // blocked at execution too, not just delisted.
 func TestComposedServerReadOnly(t *testing.T) {
@@ -574,8 +574,8 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 54 {
-		t.Fatalf("read-only roster = %d tools, want 54 (35 work + 19 platform reads — IS4)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 55 {
+		t.Fatalf("read-only roster = %d tools, want 55 (36 work + 19 platform reads — IS4+IS2b)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
@@ -591,8 +591,8 @@ func TestComposedServerReadOnly(t *testing.T) {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 35 {
-		t.Errorf("work tools under --read-only = %d, want 35 (mutator-shaped, unaffected — IS4)", workCount)
+	if workCount != 36 {
+		t.Errorf("work tools under --read-only = %d, want 36 (mutator-shaped, unaffected — IS4+IS2b)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -674,6 +674,9 @@ func (workFake) GetWorkContext(_ context.Context, ref string, _ remotestate.Work
 }
 func (workFake) GetWorkNow(context.Context, remotestate.WorkNowOptions) (*remotestate.WorkNow, error) {
 	return &remotestate.WorkNow{}, nil
+}
+func (workFake) GetWorkYours(context.Context, remotestate.WorkYoursOptions) (*remotestate.WorkYours, error) {
+	return &remotestate.WorkYours{}, nil
 }
 func (workFake) ListInitiativeUpdates(context.Context, string) (*remotestate.WorkInitiativeUpdates, error) {
 	return &remotestate.WorkInitiativeUpdates{}, nil

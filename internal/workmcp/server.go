@@ -74,6 +74,7 @@ type WorkAPI interface {
 	GetWorkItem(ctx context.Context, ref string) (*remotestate.WorkItemResolve, error)
 	GetWorkContext(ctx context.Context, ref string, opts remotestate.WorkContextOptions) (*remotestate.WorkContext, error)
 	GetWorkNow(ctx context.Context, opts remotestate.WorkNowOptions) (*remotestate.WorkNow, error)
+	GetWorkYours(ctx context.Context, opts remotestate.WorkYoursOptions) (*remotestate.WorkYours, error)
 	ListInitiativeUpdates(ctx context.Context, key string) (*remotestate.WorkInitiativeUpdates, error)
 	SetInitiativeStatus(ctx context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error)
 	PostInitiativeUpdate(ctx context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostInitiativeUpdateResponse, error)
@@ -133,10 +134,9 @@ func ReadOnly(name string) bool {
 }
 
 // Tools returns the closed tool surface. Note what is absent: no
-// task-rung write (no lifecycle write exists anywhere), no pin. Deferred,
-// tracked in the epic's IMPLEMENTATION-STATUS: work_yours rides the IS2b
-// server leg; pr_open (the provenance pen) rides IS6 — the roster reaches
-// its full 37 there.
+// task-rung write (no lifecycle write exists anywhere), no pin. One
+// deferral remains, tracked in the epic's IMPLEMENTATION-STATUS: pr_open
+// (the provenance pen) rides IS6 — the roster reaches its full 37 there.
 //
 // Wire annotations (orun-mcp UM4). The reads are the plain truth:
 // readOnly/non-destructive/idempotent. The write tools are readOnly:false,
@@ -197,7 +197,8 @@ func Tools() []mcpserve.ToolDef {
 		// confirmation IS the signature; an unattended session auto-denies).
 		// Deferred: work_yours (IS2b), pr_open (IS6).
 		{Name: "work_context", Description: "The any-key context bundle — the intended FIRST call of every session: give any key (task, milestone, epic, design, initiative; typed, letterless, alias, or machine id) and get the item's full view, its ancestry to the root with live states, the activity tail, and the open needs-you reasons in scope. Truncation is always echoed in budget[] with cursors — no silent caps.", InputSchema: obj(map[string]interface{}{"key": str("any item key or ref, e.g. PAY-T14, PAY-E2#M1, tsk_…, or a slug"), "depth": map[string]interface{}{"type": "integer", "description": "subtree depth below the item (default 2, max 4)"}, "perLevel": map[string]interface{}{"type": "integer", "description": "children per level (default 50, max 200)"}, "activity": map[string]interface{}{"type": "integer", "description": "activity tail length (default 20, max 100)"}}, "key"), Annotations: readAnn},
-		{Name: "work_now", Description: "The live board: every in-flight task × its latest worklog note × the seat working it, quiet chips derived at read. The \"what is every agent doing right now\" read; filter by initiative, epic, or seat; cursor-paged.", InputSchema: obj(map[string]interface{}{"initiative": str("filter to one initiative key (optional)"), "epic": str("filter to one epic key (optional)"), "seat": str("filter to one seat id, e.g. sp_… (optional)"), "limit": map[string]interface{}{"type": "integer", "description": "maximum rows (optional)"}, "cursor": str("resume cursor from a prior page (optional)")}), Annotations: readAnn},
+		{Name: "work_now", Description: "The live board: every in-flight task × its latest worklog note × the seat working it, quiet chips derived at read. The \"what is every agent doing right now\" read; filter by initiative, epic, or seat; cursor-paged. Long-polls: pass the last response's seq as after (+ waitSeconds ≤25) to hold until something newer lands.", InputSchema: obj(map[string]interface{}{"initiative": str("filter to one initiative key (optional)"), "epic": str("filter to one epic key (optional)"), "seat": str("filter to one seat id, e.g. sp_… (optional)"), "limit": map[string]interface{}{"type": "integer", "description": "maximum rows (optional)"}, "cursor": str("resume cursor from a prior page (optional)"), "after": map[string]interface{}{"type": "integer", "description": "long-poll watermark: the last response's seq (optional)"}, "waitSeconds": map[string]interface{}{"type": "integer", "description": "long-poll window, ≤25 (optional)"}}), Annotations: readAnn},
+		{Name: "work_yours", Description: "The addressed personal queue (AttentionItem v1): everything that waits on YOU — drifted approvals you signed, reviews requested of you, idle milestones you own — one list, newest-decision-first, each item carrying the one gesture that clears it. The daily driver; there is no second inbox. Long-polls via after/waitSeconds.", InputSchema: obj(map[string]interface{}{"limit": map[string]interface{}{"type": "integer", "description": "maximum items (optional)"}, "cursor": str("resume cursor from a prior page (optional)"), "after": map[string]interface{}{"type": "integer", "description": "long-poll watermark: the last response's seq (optional)"}, "waitSeconds": map[string]interface{}{"type": "integer", "description": "long-poll window, ≤25 (optional)"}}), Annotations: readAnn},
 		{Name: "initiative_updates_get", Description: "One initiative's update feed, newest first: the attributed health headlines humans and owner-agents posted. Health is never a formula here — it is the latest update's word (staleness derives at read).", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
 		{Name: "item_assign", Description: "Assign a membership subject to ANY noun — a task (claims work), a design (names the author), an epic or initiative (names the owner). Absorbs task_assign, which stays registered. The dispatch gate is unchanged: sp_ into a non-approved epic still refuses unless a human supplies the attributed override note.", InputSchema: obj(map[string]interface{}{"key": str("item key (task, design, epic, initiative)"), "subject": str("membership subject id (usr_/sp_/team_)"), "unassign": map[string]interface{}{"type": "boolean", "description": "remove instead of add (optional)"}, "override": str("attributed override note for the dispatch gate (optional; human-supplied)"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "subject"), Annotations: writeAnn},
 		{Name: "review_request", Description: "Request review on an epic or a design: appends review_requested and surfaces the item in reviewers' queues. An agent asking for eyes is the lifecycle working as designed.", InputSchema: obj(map[string]interface{}{"key": str("epic slug or design key"), "note": str("what to look at (optional)"), "revision": str("doc revision sha256:<hex> under review (optional)"), "reviewers": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reviewer subjects (optional)"}}, "key"), Annotations: writeAnn},
@@ -614,11 +615,13 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 
 	case "work_now":
 		var a struct {
-			Initiative string `json:"initiative"`
-			Epic       string `json:"epic"`
-			Seat       string `json:"seat"`
-			Limit      int    `json:"limit"`
-			Cursor     string `json:"cursor"`
+			Initiative  string `json:"initiative"`
+			Epic        string `json:"epic"`
+			Seat        string `json:"seat"`
+			Limit       int    `json:"limit"`
+			Cursor      string `json:"cursor"`
+			After       int64  `json:"after"`
+			WaitSeconds int    `json:"waitSeconds"`
 		}
 		if len(args) > 0 {
 			if err := json.Unmarshal(args, &a); err != nil {
@@ -627,11 +630,32 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 		}
 		board, err := s.API.GetWorkNow(ctx, remotestate.WorkNowOptions{
 			Initiative: a.Initiative, Epic: a.Epic, Seat: a.Seat, Limit: a.Limit, Cursor: a.Cursor,
+			After: a.After, WaitSeconds: a.WaitSeconds,
 		})
 		if err != nil {
 			return nil, err
 		}
 		return toolJSON(board)
+
+	case "work_yours":
+		var a struct {
+			Limit       int    `json:"limit"`
+			Cursor      string `json:"cursor"`
+			After       int64  `json:"after"`
+			WaitSeconds int    `json:"waitSeconds"`
+		}
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, fmt.Errorf("work_yours: invalid arguments")
+			}
+		}
+		queue, err := s.API.GetWorkYours(ctx, remotestate.WorkYoursOptions{
+			Limit: a.Limit, Cursor: a.Cursor, After: a.After, WaitSeconds: a.WaitSeconds,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(queue)
 
 	case "initiative_updates_get":
 		var a struct {

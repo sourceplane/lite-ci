@@ -25,7 +25,7 @@ tools:
   allow: [work_query, work_get, spec_get, work_timeline, spec_doc,
           epic_brief, milestone_get, design_get, initiative_get,
           initiatives_list, initiative_tree, task_get, activity_get,
-          work_context, work_now, initiative_updates_get,
+          work_context, work_now, work_yours, initiative_updates_get,
           catalog_get_component, catalog_affected, catalog_graph,
           task_create, task_comment, task_assign, item_assign,
           contract_propose, design_propose, task_regenerate,
@@ -89,7 +89,7 @@ under the model's own rules, never around them.
 ## What you cannot do
 
 There is no tool that writes a task's delivery rung, no pin, and no way to
-compose the 35 tools into a signature without a human confirmation. When the
+compose the 36 tools into a signature without a human confirmation. When the
 cloud answers `human_only`, that is the system working: surface the decision
 to a human with your recommendation and the evidence, then act on their
 verdict.

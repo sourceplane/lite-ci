@@ -118,8 +118,8 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 	if want := counts.work + counts.platform + counts.server; len(tools) != want {
 		t.Fatalf("fully mounted roster = %d tools, want %d", len(tools), want)
 	}
-	if len(tools) != 61 {
-		t.Fatalf("fully mounted roster = %d tools, want 61 (35 work + 25 platform + connection_info — IS4)", len(tools))
+	if len(tools) != 62 {
+		t.Fatalf("fully mounted roster = %d tools, want 62 (36 work + 25 platform + connection_info — IS4+IS2b)", len(tools))
 	}
 	last := tools[len(tools)-1].(map[string]interface{})
 	if last["name"] != "connection_info" {
