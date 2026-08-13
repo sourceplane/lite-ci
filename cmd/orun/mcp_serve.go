@@ -22,6 +22,7 @@ import (
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/mcpserve"
 	"github.com/sourceplane/orun/internal/platformmcp"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/workmcp"
 )
@@ -199,7 +200,12 @@ func (r mcpMountReport) connectionInfo() mcpserve.ConnectionInfo {
 func assembleMcpProviders(client *remotestate.Client, rep mcpMountReport, readOnly bool) []mcpserve.ToolProvider {
 	var providers []mcpserve.ToolProvider
 	if rep.workMounted {
-		providers = append(providers, &workmcp.Server{API: client, Workspace: rep.workspace})
+		// IS6: the provenance pen mounts with the work plane — pr_open acts
+		// on the serve's cwd (the harness spawns this server in its workdir,
+		// i.e. the checkout). The pen fills the manifest with the session's
+		// recorded skill pins; a repo-less serve answers pr_open with a
+		// clear verdict instead.
+		providers = append(providers, &workmcp.Server{API: client, Workspace: rep.workspace, Pen: servePen()})
 	}
 	if rep.platformMounted {
 		providers = append(providers, &platformmcp.Provider{API: client, DefaultWorkspace: rep.workspace, ReadOnly: readOnly})
@@ -294,4 +300,26 @@ func registerMcpServeCommand(parent *cobra.Command, counts mcpRosterCounts) {
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, fmt.Sprintf("serve only the platform plane's read tools (drops the %d platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)", counts.platformWrites))
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a multi-line startup summary to stderr (planes mounted and why, auth source, token expiry, workspace source, backend URL)")
 	parent.AddCommand(cmd)
+}
+
+// servePen builds the pr_open pen for this serve: the cwd's repository,
+// the ambient GitHub credential, and the session's recorded skill pins
+// (IS6a's skills.json) folded into every manifest it writes.
+func servePen() workmcp.ProvenancePen {
+	return penWithSessionManifest{}
+}
+
+// penWithSessionManifest fills the manifest halves the MCP caller cannot
+// know (the pins the session materialized, the session id) before handing
+// the gesture to the provenance pen.
+type penWithSessionManifest struct{}
+
+func (penWithSessionManifest) Open(ctx context.Context, req provenance.OpenRequest) (*provenance.OpenResult, error) {
+	req.Manifest.Version = provenance.ManifestVersion
+	req.Manifest.Skills = loadSessionSkillPins()
+	if req.Manifest.Session == "" {
+		req.Manifest.Session = os.Getenv("ORUN_SESSION")
+	}
+	pen := &provenance.Pen{Workdir: ".", Token: cliauth.GitHubTokenFromEnv}
+	return pen.Open(ctx, req)
 }

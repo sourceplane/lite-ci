@@ -23,7 +23,7 @@ tools:
           catalog_get_component, catalog_affected, task_comment,
           # A bootstrap narrates like every working seat (IS4) — the note
           # is fold-inert and rate-clamped; nothing to approve.
-          task_note, connection_info,
+          task_note, pr_open, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead,
           Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch,
           # The brief mandates running the umbrella in the background and

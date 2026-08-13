@@ -98,3 +98,8 @@ func ResolveGitHubRepoIdentity(ctx context.Context, remoteURL string) (*GitHubRe
 		OwnerLogin: body.Owner.Login,
 	}, nil
 }
+
+// GitHubTokenFromEnv is the exported face of the ambient-credential
+// resolution (env vars, then the gh keychain) — the provenance pen (IS6)
+// and any other caller share ONE way to find a GitHub credential.
+func GitHubTokenFromEnv() string { return githubTokenFromEnv() }

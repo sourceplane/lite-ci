@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
@@ -435,13 +436,14 @@ func TestInitializeAndToolSurface(t *testing.T) {
 		"initiative_update_post", "initiative_status_set",
 		"design_adopt", "design_supersede",
 		"epic_approve", "epic_revoke_approval",
+		"pr_open",
 	} {
 		if !names[want] {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 36 {
-		t.Errorf("tool surface = %d tools, want exactly 36 (closed: 17 reads + 19 writes — IS4+IS2b; pr_open rides IS6, completing the 37)", len(tools))
+	if len(tools) != 37 {
+		t.Errorf("tool surface = %d tools, want exactly 37 (closed: 17 reads + 20 writes — the epic's FULL roster, completed by pr_open in IS6)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	// The sweep runs over the composed server's tools/list (the merged
@@ -899,5 +901,59 @@ func TestIS4StateAndDecisions(t *testing.T) {
 	}
 	if len(api.updates) != 1 || api.updates[0] != "ai-native-work: on_track" {
 		t.Fatalf("updates = %v", api.updates)
+	}
+}
+
+// fakePen records pr_open gestures and answers like the honest pen.
+type fakePen struct {
+	opened []provenance.OpenRequest
+	url    string // "" = anonymous (compare-URL fallback)
+}
+
+func (f *fakePen) Open(_ context.Context, req provenance.OpenRequest) (*provenance.OpenResult, error) {
+	f.opened = append(f.opened, req)
+	out := &provenance.OpenResult{Branch: "orun/" + req.TaskKey + "-x", Pushed: true, Body: "body"}
+	if f.url != "" {
+		out.Opened = true
+		out.URL = f.url
+	} else {
+		out.CompareURL = "https://github.com/o/r/compare/main...orun/" + req.TaskKey + "-x?expand=1"
+	}
+	return out, nil
+}
+
+// TestPrOpen (IS6): the pen completes the roster — mounted, it opens (or
+// honestly prepares) the task's PR; unmounted, the verdict says exactly
+// what to do instead. task stays required: a PR opens FOR a task.
+func TestPrOpen(t *testing.T) {
+	pen := &fakePen{url: "https://github.com/o/r/pull/7"}
+	s := &Server{API: &fakeAPI{summary: fixtureSummary()}, Workspace: "ws_1", Pen: pen}
+	responses := rpc(t, s,
+		callLine(1, "pr_open", `{"task":"PAY-T14","title":"Route the reads","draft":true}`),
+		callLine(2, "pr_open", `{}`),
+	)
+	text, isErr := resultText(t, responses[0])
+	if isErr || !strings.Contains(text, "opened https://github.com/o/r/pull/7") {
+		t.Fatalf("pr_open result: %s", text)
+	}
+	if len(pen.opened) != 1 || pen.opened[0].TaskKey != "PAY-T14" || !pen.opened[0].Draft {
+		t.Fatalf("pen gestures = %+v", pen.opened)
+	}
+	if text, isErr = resultText(t, responses[1]); !isErr || !strings.Contains(text, "task is required") {
+		t.Fatalf("pr_open without a task must fail: %s", text)
+	}
+
+	// Anonymous pen: the compare URL comes back — prepared, never faked.
+	anon := &Server{API: &fakeAPI{summary: fixtureSummary()}, Workspace: "ws_1", Pen: &fakePen{}}
+	responses = rpc(t, anon, callLine(1, "pr_open", `{"task":"PAY-T14"}`))
+	if text, isErr = resultText(t, responses[0]); isErr || !strings.Contains(text, "compare/main...orun/PAY-T14") {
+		t.Fatalf("anonymous pr_open result: %s", text)
+	}
+
+	// No pen mounted (a repo-less serve): a clear verdict, not a git guess.
+	bare := &Server{API: &fakeAPI{summary: fixtureSummary()}, Workspace: "ws_1"}
+	responses = rpc(t, bare, callLine(1, "pr_open", `{"task":"PAY-T14"}`))
+	if text, isErr = resultText(t, responses[0]); !isErr || !strings.Contains(text, "no repository workspace mounted") {
+		t.Fatalf("penless pr_open verdict: %s", text)
 	}
 }
