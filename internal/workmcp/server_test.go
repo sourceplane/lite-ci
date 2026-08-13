@@ -27,6 +27,15 @@ type fakeAPI struct {
 	// refuseWrites, when set, is returned by the envelope writes verbatim —
 	// the cloud's typed human_only verdict in tests.
 	refuseWrites error
+	// orun-initiatives-v2 (IS4)
+	statusSet []string // key→to
+	updates   []string // key: health
+	dones     []string // key: note
+	notes     []string // key: text
+	reviews   []string // collection/key
+	verdicts  []string // collection/key=verdict
+	approvals []string // key@revision (approve) / key: note (revoke)
+	adoptions []string // adopt key / supersede key→by
 }
 
 func (f *fakeAPI) GetWorkSummary(context.Context) (*remotestate.WorkSummary, error) {
@@ -43,8 +52,15 @@ func (f *fakeAPI) CommentWork(_ context.Context, key, body string) (*remotestate
 	f.comments = append(f.comments, key+": "+body)
 	return &remotestate.WorkMutationResponse{Key: key, Seq: 13}, nil
 }
-func (f *fakeAPI) AssignWork(_ context.Context, key, subject string, _ bool) (*remotestate.WorkMutationResponse, error) {
-	f.assigned = append(f.assigned, key+"→"+subject)
+func (f *fakeAPI) AssignWorkItem(_ context.Context, key string, req remotestate.AssignWorkItemRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	arrow := "→"
+	if req.Unassign {
+		arrow = "⇥"
+	}
+	f.assigned = append(f.assigned, key+arrow+req.Subject)
 	return &remotestate.WorkMutationResponse{Key: key, Seq: 14}, nil
 }
 func (f *fakeAPI) EditWorkContract(_ context.Context, key string, _ remotestate.WorkContract) (*remotestate.WorkMutationResponse, error) {
@@ -192,6 +208,127 @@ func (f *fakeAPI) UpsertMilestones(_ context.Context, epicKey string, req remote
 	return &remotestate.WorkMutationResponse{Key: epicKey + "#" + req.Key, Seq: 32}, nil
 }
 
+// ── orun-initiatives-v2 (IS4) ───────────────────────────────────────────────
+
+func (f *fakeAPI) GetWorkItem(_ context.Context, ref string) (*remotestate.WorkItemResolve, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkItemResolve{Kind: "task", Key: ref, CanonicalKey: "PAY-T14", PublicID: "tsk_01ABC", Title: "route reads"}, nil
+}
+func (f *fakeAPI) GetWorkContext(_ context.Context, ref string, opts remotestate.WorkContextOptions) (*remotestate.WorkContext, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkContext{
+		Item: remotestate.WorkContextItem{Kind: "task", Key: ref, CanonicalKey: "PAY-T14", Title: "route reads"},
+		View: json.RawMessage(`{"task":{"key":"` + ref + `"}}`),
+		Ancestry: []remotestate.WorkContextNode{
+			{Kind: "milestone", Key: "demo-epic#M1", CanonicalKey: "PAY-E1#M1", Title: "Foundation", State: "active"},
+			{Kind: "initiative", Key: "ai-native-work", CanonicalKey: "PAY", Title: "AI-native work", State: "active"},
+		},
+		Activity: []remotestate.WorkActivityEntry{{At: "2026-08-01T00:00:00Z", Source: "coordination", Kind: "created", Subject: ref, Tag: ref, Text: "created " + ref}},
+		NeedsYou: []remotestate.WorkNeedsYouReason{},
+		Budget:   []remotestate.WorkContextBudget{{Level: "tasks", Returned: 50, Total: 90, Cursor: "c1"}},
+	}, nil
+}
+func (f *fakeAPI) GetWorkNow(_ context.Context, opts remotestate.WorkNowOptions) (*remotestate.WorkNow, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkNow{Rows: []remotestate.WorkNowRow{{
+		Key: "ORN-1", Title: "route reads", Rung: "in_progress", Seat: "sp_1",
+		Now:   &remotestate.WorkNowLine{Text: "tests green, writing the migration", Actor: remotestate.WorkActor{Type: "agent", ID: "sp_1"}, At: "2026-08-13T00:00:00Z"},
+		Quiet: false,
+	}}, NextCursor: "n2"}, nil
+}
+func (f *fakeAPI) ListInitiativeUpdates(_ context.Context, key string) (*remotestate.WorkInitiativeUpdates, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkInitiativeUpdates{Updates: []remotestate.WorkInitiativeUpdateView{{
+		PublicID: "upd_01", Initiative: key, Health: "at_risk", Body: "checkout epic slipped",
+		Author: remotestate.WorkActor{Type: "user", ID: "u"}, CreatedAt: "2026-08-10T00:00:00Z",
+	}}}, nil
+}
+func (f *fakeAPI) SetInitiativeStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.statusSet = append(f.statusSet, key+"→"+req.To)
+	out := &remotestate.SetInitiativeStatusResponse{Key: key, Seq: 41, Status: req.To}
+	if req.To == "completed" && !req.Force {
+		out.Warning = "2 member task(s) still open"
+	}
+	return out, nil
+}
+func (f *fakeAPI) PostInitiativeUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostInitiativeUpdateResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.updates = append(f.updates, key+": "+req.Health)
+	return &remotestate.PostInitiativeUpdateResponse{Key: key, Seq: 42, Update: remotestate.WorkInitiativeUpdateView{
+		PublicID: "upd_02", Initiative: key, Health: req.Health, Body: req.Body,
+		Author: remotestate.WorkActor{Type: "agent", ID: "sp_1"}, CreatedAt: "2026-08-13T00:00:00Z",
+	}}, nil
+}
+func (f *fakeAPI) AssertTaskDone(_ context.Context, key, note, _ string) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.dones = append(f.dones, key+": "+note)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 43}, nil
+}
+func (f *fakeAPI) PostTaskNote(_ context.Context, key string, req remotestate.PostTaskNoteRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.notes = append(f.notes, key+": "+req.Text)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 44}, nil
+}
+func (f *fakeAPI) RequestWorkReview(_ context.Context, collection, key string, req remotestate.WorkReviewRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.reviews = append(f.reviews, collection+"/"+key)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 45}, nil
+}
+func (f *fakeAPI) SubmitWorkVerdict(_ context.Context, collection, key string, req remotestate.WorkVerdictRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.verdicts = append(f.verdicts, collection+"/"+key+"="+req.Verdict)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 46}, nil
+}
+func (f *fakeAPI) ApproveEpic(_ context.Context, key string, req remotestate.ApproveEpicRequest) (*remotestate.ApproveEpicResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.approvals = append(f.approvals, key+"@"+req.Revision)
+	return &remotestate.ApproveEpicResponse{Key: key, Seq: 47, Snapshot: "sha256:snap"}, nil
+}
+func (f *fakeAPI) RevokeEpicApproval(_ context.Context, key, note string) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.approvals = append(f.approvals, key+": "+note)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 48}, nil
+}
+func (f *fakeAPI) AdoptDesign(_ context.Context, key string, req remotestate.AdoptDesignRequest) (*remotestate.AdoptDesignResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.adoptions = append(f.adoptions, "adopt "+key)
+	return &remotestate.AdoptDesignResponse{Key: key, Seq: 49, Minted: []string{"checkout-epic"}, Tasks: []string{"PAY-T20"}}, nil
+}
+func (f *fakeAPI) SupersedeDesign(_ context.Context, key string, req remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.adoptions = append(f.adoptions, "supersede "+key+"→"+req.By)
+	return &remotestate.WorkMutationResponse{Key: key, Seq: 50}, nil
+}
+
 func fixtureSummary() *remotestate.WorkSummary {
 	return &remotestate.WorkSummary{
 		Specs: []remotestate.WorkSpecView{{Key: "demo-epic", Title: "Demo", CreatedBy: remotestate.WorkActor{Type: "user", ID: "u"}, Progress: map[string]int{"ready": 1}}},
@@ -276,13 +413,20 @@ func TestInitializeAndToolSurface(t *testing.T) {
 		"design_propose", "task_regenerate",
 		"initiatives_list", "initiative_tree", "task_get", "activity_get",
 		"initiative_create", "milestone_upsert",
+		// orun-initiatives-v2 (IS4) — the pen.
+		"work_context", "work_now", "initiative_updates_get",
+		"item_assign", "review_request", "review_verdict",
+		"task_done", "task_note",
+		"initiative_update_post", "initiative_status_set",
+		"design_adopt", "design_supersede",
+		"epic_approve", "epic_revoke_approval",
 	} {
 		if !names[want] {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 21 {
-		t.Errorf("tool surface = %d tools, want exactly 21 (closed: 13 reads + 8 writes — IN5)", len(tools))
+	if len(tools) != 35 {
+		t.Errorf("tool surface = %d tools, want exactly 35 (closed: 16 reads + 19 writes — IS4; work_yours rides the IS2b server leg and pr_open rides IS6, completing the 37)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	// The sweep runs over the composed server's tools/list (the merged
@@ -342,6 +486,8 @@ func TestWireAnnotations(t *testing.T) {
 		"milestone_get": true, "design_get": true, "initiative_get": true,
 		"initiatives_list": true, "initiative_tree": true, "task_get": true,
 		"activity_get": true,
+		// IS4
+		"work_context": true, "work_now": true, "initiative_updates_get": true,
 	}
 	for _, tool := range Tools() {
 		want := map[string]bool{
@@ -538,6 +684,12 @@ func TestHumanOnlyRefusalPassesThrough(t *testing.T) {
 	responses := rpc(t, s,
 		callLine(1, "milestone_upsert", `{"epic":"demo-epic","op":"edit","key":"M1","title":"x"}`),
 		callLine(2, "initiative_create", `{"slug":"x","title":"X"}`),
+		// IS4: the decisions are nameable now, and the refusal still passes
+		// through VERBATIM when a non-human actor reaches the model layer —
+		// naming a decision is not deciding.
+		callLine(3, "epic_approve", `{"key":"demo-epic","revision":"sha256:b2d4"}`),
+		callLine(4, "design_adopt", `{"key":"DSG-1"}`),
+		callLine(5, "initiative_status_set", `{"key":"ai-native-work","to":"completed"}`),
 	)
 	for i, r := range responses {
 		text, isErr := resultText(t, r)
@@ -550,5 +702,177 @@ func TestHumanOnlyRefusalPassesThrough(t *testing.T) {
 		if !strings.Contains(text, "approving an epic is a human decision") {
 			t.Fatalf("refusal %d dropped the server message: %s", i+1, text)
 		}
+	}
+}
+
+// TestIS4Reads: the context bundle comes back whole (view, ancestry with
+// live states, the budget echo — no silent caps), the live board carries the
+// now lines, and the update feed carries attributed health headlines.
+func TestIS4Reads(t *testing.T) {
+	s := &Server{API: &fakeAPI{summary: fixtureSummary()}, Workspace: "ws_1"}
+	responses := rpc(t, s,
+		callLine(1, "work_context", `{"key":"PAY-14","depth":3}`),
+		callLine(2, "work_now", `{"seat":"sp_1"}`),
+		callLine(3, "initiative_updates_get", `{"key":"ai-native-work"}`),
+		callLine(4, "work_context", `{}`),
+		callLine(5, "initiative_updates_get", `{}`),
+	)
+	text, isErr := resultText(t, responses[0])
+	if isErr || !strings.Contains(text, `"canonicalKey": "PAY-T14"`) {
+		t.Fatalf("work_context lacks the resolved item: %s", text)
+	}
+	if !strings.Contains(text, `"ancestry"`) || !strings.Contains(text, `"state": "active"`) {
+		t.Fatalf("work_context lacks ancestry with live states: %s", text)
+	}
+	if !strings.Contains(text, `"returned": 50`) || !strings.Contains(text, `"total": 90`) {
+		t.Fatalf("work_context lacks the budget echo (IS-H): %s", text)
+	}
+	text, isErr = resultText(t, responses[1])
+	if isErr || !strings.Contains(text, "tests green, writing the migration") || !strings.Contains(text, `"nextCursor": "n2"`) {
+		t.Fatalf("work_now lacks the live board: %s", text)
+	}
+	text, isErr = resultText(t, responses[2])
+	if isErr || !strings.Contains(text, `"health": "at_risk"`) || !strings.Contains(text, "checkout epic slipped") {
+		t.Fatalf("initiative_updates_get lacks the feed: %s", text)
+	}
+	if text, isErr = resultText(t, responses[3]); !isErr || !strings.Contains(text, "key is required") {
+		t.Fatalf("work_context without a key must fail: %s", text)
+	}
+	if text, isErr = resultText(t, responses[4]); !isErr || !strings.Contains(text, "key is required") {
+		t.Fatalf("initiative_updates_get without a key must fail: %s", text)
+	}
+}
+
+// TestIS4VoiceAndAssign: the assertion lane demands its note, the worklog
+// flows, the generalized assign covers assign and unassign, and task_assign
+// (absorbed, never renamed) forwards to the same generalized path.
+func TestIS4VoiceAndAssign(t *testing.T) {
+	api := &fakeAPI{summary: fixtureSummary()}
+	s := &Server{API: api, Workspace: "ws_1"}
+	responses := rpc(t, s,
+		callLine(1, "task_done", `{"key":"ORN-1","note":"docs shipped; no PR will exist"}`),
+		callLine(2, "task_done", `{"key":"ORN-1"}`),
+		callLine(3, "task_note", `{"key":"ORN-1","text":"tests green, writing the migration","ref":"abc123"}`),
+		callLine(4, "item_assign", `{"key":"demo-epic","subject":"usr_7"}`),
+		callLine(5, "item_assign", `{"key":"ORN-1","subject":"sp_1","unassign":true}`),
+		callLine(6, "task_assign", `{"key":"ORN-1","subject":"sp_agent"}`),
+	)
+	text, isErr := resultText(t, responses[0])
+	if isErr || !strings.Contains(text, "done asserted on ORN-1") || !strings.Contains(text, "weakest voice") {
+		t.Fatalf("task_done result: %s", text)
+	}
+	if text, isErr = resultText(t, responses[1]); !isErr || !strings.Contains(text, "note are required") {
+		t.Fatalf("task_done without a note must fail — an assertion without a reason is a status write: %s", text)
+	}
+	text, isErr = resultText(t, responses[2])
+	if isErr || !strings.Contains(text, "narration is inert") {
+		t.Fatalf("task_note result: %s", text)
+	}
+	if len(api.dones) != 1 || api.dones[0] != "ORN-1: docs shipped; no PR will exist" {
+		t.Fatalf("dones = %v", api.dones)
+	}
+	if len(api.notes) != 1 || api.notes[0] != "ORN-1: tests green, writing the migration" {
+		t.Fatalf("notes = %v", api.notes)
+	}
+	text, isErr = resultText(t, responses[3])
+	if isErr || !strings.Contains(text, "assigned demo-epic ↔ usr_7") {
+		t.Fatalf("item_assign result: %s", text)
+	}
+	text, isErr = resultText(t, responses[4])
+	if isErr || !strings.Contains(text, "unassigned") {
+		t.Fatalf("item_assign unassign result: %s", text)
+	}
+	if _, isErr = resultText(t, responses[5]); isErr {
+		t.Fatalf("task_assign (absorbed) errored: %v", responses[5])
+	}
+	// All three assigns — including forwarded task_assign — went through the
+	// ONE generalized path.
+	if len(api.assigned) != 3 || api.assigned[2] != "ORN-1→sp_agent" {
+		t.Fatalf("assigned = %v", api.assigned)
+	}
+}
+
+// TestIS4StateAndDecisions: the state machine speaks (warning surfaced),
+// updates post attributed, reviews route by key grammar (designs vs epics),
+// verdicts demand their reasoning, and the four signature tools reach the
+// mutators with their arguments intact.
+func TestIS4StateAndDecisions(t *testing.T) {
+	api := &fakeAPI{summary: fixtureSummary()}
+	s := &Server{API: api, Workspace: "ws_1"}
+	responses := rpc(t, s,
+		callLine(1, "initiative_status_set", `{"key":"ai-native-work","to":"active"}`),
+		callLine(2, "initiative_status_set", `{"key":"ai-native-work","to":"completed"}`),
+		callLine(3, "initiative_update_post", `{"key":"ai-native-work","health":"on_track","body":"checkout epic landed"}`),
+		callLine(4, "review_request", `{"key":"DSG-1","note":"compare with option B"}`),
+		callLine(5, "review_request", `{"key":"demo-epic"}`),
+		callLine(6, "review_verdict", `{"key":"PAY-D3","verdict":"approve","note":"model is sound"}`),
+		callLine(7, "review_verdict", `{"key":"demo-epic","verdict":"approve"}`),
+		callLine(8, "epic_approve", `{"key":"demo-epic","revision":"sha256:b2d4"}`),
+		callLine(9, "epic_approve", `{"key":"demo-epic"}`),
+		callLine(10, "epic_revoke_approval", `{"key":"demo-epic","note":"scope changed"}`),
+		callLine(11, "design_adopt", `{"key":"DSG-1","taskPrefix":"PAY"}`),
+		callLine(12, "design_supersede", `{"key":"DSG-1","by":"DSG-2"}`),
+	)
+	text, isErr := resultText(t, responses[0])
+	if isErr || !strings.Contains(text, "ai-native-work is now active") {
+		t.Fatalf("initiative_status_set result: %s", text)
+	}
+	// The complete-warn surfaces beside the success — never blocks (IS2).
+	text, isErr = resultText(t, responses[1])
+	if isErr || !strings.Contains(text, "2 member task(s) still open") {
+		t.Fatalf("complete warning not surfaced: %s", text)
+	}
+	text, isErr = resultText(t, responses[2])
+	if isErr || !strings.Contains(text, "health headline now on_track") {
+		t.Fatalf("initiative_update_post result: %s", text)
+	}
+	if _, isErr = resultText(t, responses[3]); isErr {
+		t.Fatalf("review_request design errored: %v", responses[3])
+	}
+	if _, isErr = resultText(t, responses[4]); isErr {
+		t.Fatalf("review_request epic errored: %v", responses[4])
+	}
+	// The collection heuristic: design keys (legacy DSG-n, typed PFX-Dn)
+	// ride /designs; slugs ride /epics.
+	if len(api.reviews) != 2 || api.reviews[0] != "designs/DSG-1" || api.reviews[1] != "epics/demo-epic" {
+		t.Fatalf("reviews = %v", api.reviews)
+	}
+	if _, isErr = resultText(t, responses[5]); isErr {
+		t.Fatalf("review_verdict errored: %v", responses[5])
+	}
+	if len(api.verdicts) != 1 || api.verdicts[0] != "designs/PAY-D3=approve" {
+		t.Fatalf("verdicts = %v", api.verdicts)
+	}
+	if text, isErr = resultText(t, responses[6]); !isErr || !strings.Contains(text, "note are required") {
+		t.Fatalf("review_verdict without a note must fail — a vote, not a review: %s", text)
+	}
+	text, isErr = resultText(t, responses[7])
+	if isErr || !strings.Contains(text, "sealed brief sha256:snap") {
+		t.Fatalf("epic_approve result: %s", text)
+	}
+	if text, isErr = resultText(t, responses[8]); !isErr || !strings.Contains(text, "revision are required") {
+		t.Fatalf("epic_approve without a revision must fail: %s", text)
+	}
+	if _, isErr = resultText(t, responses[9]); isErr {
+		t.Fatalf("epic_revoke_approval errored: %v", responses[9])
+	}
+	text, isErr = resultText(t, responses[10])
+	if isErr || !strings.Contains(text, "minted epics [checkout-epic]") || !strings.Contains(text, "approved at rev 0 under the same signature") {
+		t.Fatalf("design_adopt result: %s", text)
+	}
+	if _, isErr = resultText(t, responses[11]); isErr {
+		t.Fatalf("design_supersede errored: %v", responses[11])
+	}
+	if len(api.adoptions) != 2 || api.adoptions[0] != "adopt DSG-1" || api.adoptions[1] != "supersede DSG-1→DSG-2" {
+		t.Fatalf("adoptions = %v", api.adoptions)
+	}
+	if len(api.approvals) != 2 || api.approvals[0] != "demo-epic@sha256:b2d4" || api.approvals[1] != "demo-epic: scope changed" {
+		t.Fatalf("approvals = %v", api.approvals)
+	}
+	if len(api.statusSet) != 2 || api.statusSet[0] != "ai-native-work→active" {
+		t.Fatalf("statusSet = %v", api.statusSet)
+	}
+	if len(api.updates) != 1 || api.updates[0] != "ai-native-work: on_track" {
+		t.Fatalf("updates = %v", api.updates)
 	}
 }

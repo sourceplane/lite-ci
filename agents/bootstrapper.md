@@ -16,7 +16,14 @@ tools:
   # is reserved for work-plane mutations a bootstrap should never need
   # silently. deny:["*"] backstops, and Task stays denied — a bootstrap is
   # one conversation, not a fleet.
-  allow: [work_query, work_get, spec_get, catalog_get_component, catalog_affected, task_comment, connection_info,
+  allow: [work_query, work_get, spec_get, work_timeline, spec_doc,
+          epic_brief, milestone_get, design_get, initiative_get,
+          initiatives_list, initiative_tree, task_get, activity_get,
+          work_context, work_now, initiative_updates_get,
+          catalog_get_component, catalog_affected, task_comment,
+          # A bootstrap narrates like every working seat (IS4) — the note
+          # is fold-inert and rate-clamped; nothing to approve.
+          task_note, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead,
           Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch,
           # The brief mandates running the umbrella in the background and
@@ -27,7 +34,7 @@ tools:
           # tool renders it as structured AG-UI in the cockpit (denied lanes
           # made the agent fall back to plain prose, observed live).
           AskUserQuestion]
-  ask: [contract_propose, task_assign]
+  ask: [contract_propose, task_assign, item_assign]
   deny: ["*"]
 owner: sourceplane/team/platform
 extends: base-orun-literacy

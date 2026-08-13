@@ -35,10 +35,20 @@ Subcommands:
   edit      Edit an item's envelope (title/description/owner/target/…)
   cancel    Retire an item (task or epic) — the append-only "delete"
   import    Map a specs/ tree to the hierarchy and apply to Orun Cloud
-  task      Task detail (view) and creation (create)
+  task      Task detail (view), creation (create), voice (done, note)
   activity  The tagged activity tail for any noun
   doc       Pull an epic spec / design doc as markdown
   design    List or propose design runs on an initiative
+
+State and the loop (orun-initiatives-v2 — initiative status is a stored
+speech act now; task rungs stay derived):
+  start | pause | resume | complete | reopen   The five-state machine
+  update / updates    Post / read the attributed health headlines
+  context   The any-key context bundle (item, ancestry, activity, needs-you)
+  assign    Assign a subject to any noun (task, design, epic, initiative)
+  review    request | verdict — eyes and opinions on epics and designs
+  adopt     Adopt a design (interactive confirm = the signature)
+  now       The live board: in-flight tasks × latest worklog note × seat
 
 Run 'orun initiatives <subcommand> --help' for details.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,6 +65,18 @@ Run 'orun initiatives <subcommand> --help' for details.`,
 	cmd.AddCommand(newInitiativesActivityCommand())
 	cmd.AddCommand(newInitiativesDocCommand())
 	cmd.AddCommand(newInitiativesDesignCommand())
+	// orun-initiatives-v2 (IS4) — the state machine, the update cadence,
+	// the context bundle, the generalized assign, review/adopt, the board.
+	for _, sub := range newInitiativeStatusCommands() {
+		cmd.AddCommand(sub)
+	}
+	cmd.AddCommand(newInitiativesUpdateCommand())
+	cmd.AddCommand(newInitiativesUpdatesCommand())
+	cmd.AddCommand(newInitiativesContextCommand())
+	cmd.AddCommand(newInitiativesAssignCommand())
+	cmd.AddCommand(newInitiativesReviewCommand())
+	cmd.AddCommand(newInitiativesAdoptCommand())
+	cmd.AddCommand(newInitiativesNowCommand())
 	root.AddCommand(cmd)
 }
 
@@ -666,13 +688,15 @@ re-imports skip existing specs and milestones).`,
 func newInitiativesTaskCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "task",
-		Short: "Task detail (view) and creation (create)",
+		Short: "Task detail (view), creation (create), and the agent's voice (done, note)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(newInitiativesTaskViewCommand())
 	cmd.AddCommand(newInitiativesTaskCreateCommand())
+	cmd.AddCommand(newInitiativesTaskDoneCommand())
+	cmd.AddCommand(newInitiativesTaskNoteCommand())
 	return cmd
 }
 

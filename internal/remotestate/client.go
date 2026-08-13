@@ -973,10 +973,16 @@ func backoff(attempt int) time.Duration {
 }
 
 // urlSegment escapes a path segment to be safe in a URL path.
-// We only need to handle the most common special characters.
+// We only need to handle the most common special characters. `#` and `?`
+// matter since orun-initiatives-v2: milestone refs (`PAY-E2#M1`) ride the
+// resolver paths, and an unescaped `#` parses as a URL fragment — the
+// request would silently aim at the epic instead of the milestone.
 func urlSegment(s string) string {
+	s = strings.ReplaceAll(s, "%", "%25")
 	s = strings.ReplaceAll(s, "/", "%2F")
 	s = strings.ReplaceAll(s, ":", "%3A")
 	s = strings.ReplaceAll(s, " ", "%20")
+	s = strings.ReplaceAll(s, "#", "%23")
+	s = strings.ReplaceAll(s, "?", "%3F")
 	return s
 }

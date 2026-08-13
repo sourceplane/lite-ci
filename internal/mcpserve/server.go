@@ -135,12 +135,16 @@ type PromptProvider interface {
 }
 
 // ForbiddenNameFragments must appear in no tool name on the merged roster:
-// the WP-3/WP-10 work-plane invariants (no lifecycle write, no pin, no
-// stored status) extend over every composed provider (README locked
-// decision 5), and v4 (WH5) extends them with the human-only decisions —
-// no approve, no adopt (V4-2: an agent cannot even NAME the decision).
-// Tests sweep tools/list against these.
-var ForbiddenNameFragments = []string{"status", "pin", "lifecycle", "approve", "adopt"}
+// the WP-3/WP-10 work-plane invariants extend over every composed provider
+// (README locked decision 5). Re-aimed with orun-initiatives-v2 (IS4) to the
+// NARROWED doctrine: initiative state is now a stored speech act
+// (initiative_status_set is a lawful tool) and the decisions are nameable
+// under ask tiers (epic_approve, design_adopt — naming a decision is not
+// deciding; the ask-lane confirmation is the signature and the cloud's model
+// layer refuses non-human actors regardless). What remains forbidden,
+// forever, is the guarded category itself: no tool may write or pin a task's
+// DELIVERY rung. Tests sweep tools/list against these.
+var ForbiddenNameFragments = []string{"task_status", "rung", "pin", "lifecycle"}
 
 // Server composes tool providers behind one stdio JSON-RPC loop.
 type Server struct {
