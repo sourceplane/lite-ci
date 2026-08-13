@@ -17,8 +17,28 @@ Neither repo may break a contract unilaterally (see
 `internal/platformmcp/` for `go:embed`; `TestEmbeddedManifestMatchesVendored`
 and `TestVendoredManifestChecksum` (internal/platformmcp/parity_test.go) pin
 the copy and the CHECKSUM entry. Re-vendor procedure: copy the new export
-here AND into `internal/platformmcp/`, update `CHECKSUM`, run the parity
-tests.
+here AND into `internal/platformmcp/`, update `CHECKSUM`, reconcile
+`cededToWorkPlane` (below), run the parity tests.
+
+### Tools this repo cedes to the work plane
+
+The manifest is the TS plane's whole roster, and the TS plane serves some
+tools this repo already serves natively. `internal/platformmcp` therefore
+advertises a **subset**: `cededToWorkPlane` (internal/platformmcp/manifest.go)
+lists the names `internal/workmcp` owns, and the platform provider drops
+them from `tools/list` and disowns them at dispatch.
+
+As of the 29-tool manifest that is four work-plane reads — `initiatives_list`,
+`initiative_tree`, `task_get`, `activity_get` — leaving 25 advertised
+(19 reads + 6 writes), which is why the platform-plane counts in
+`specs/orun-mcp` and the website docs did not move when the manifest grew.
+
+This is not optional bookkeeping: `mcpserve.checkRoster` rejects a roster
+carrying one name twice, so an unceded duplicate makes `orun mcp serve` fail
+at startup as soon as both planes mount. **Every re-vendor must ask whether
+the new export added a name `internal/workmcp` already serves.**
+`TestCededNamesResolveInTheManifest` catches the opposite drift — a ceded
+name the manifest no longer carries.
 
 ## Drift guard
 
@@ -59,3 +79,26 @@ If `TestVendoredContractChecksum` fails unexpectedly, it means the vendored
 file changed without the checksum being updated — either revert the edit, or
 **re-vendor from orun-cloud or renegotiate the contract**, then update
 `CHECKSUM`.
+
+### Re-vendoring `mcp-tool-manifest.json`
+
+Same shape, one extra step:
+
+1. Copy the new export verbatim, here and into the embed directory:
+
+       cp ../orun-cloud/packages/mcp/tool-manifest.json \
+          specs/orun-cloud/vendored/mcp-tool-manifest.json
+       cp specs/orun-cloud/vendored/mcp-tool-manifest.json internal/platformmcp/
+
+2. Record the new digest in `CHECKSUM`:
+
+       sha256sum specs/orun-cloud/vendored/mcp-tool-manifest.json
+       # paste "<sha256>  mcp-tool-manifest.json" into CHECKSUM
+
+3. **Reconcile `cededToWorkPlane`.** Diff the new tool names against
+   `workmcp.Tools()`; any name both planes serve must be ceded, or
+   `orun mcp serve` fails at startup on the duplicate.
+
+4. Update the roster counts asserted in `internal/platformmcp/parity_test.go`
+   (manifest total and reads, advertised total and reads) and run
+   `go test ./internal/platformmcp/... ./cmd/orun/...`.

@@ -109,11 +109,26 @@ hints) — generated from the registry and freshness-tested there.
 
 This repo vendors it at `specs/orun-cloud/vendored/mcp-tool-manifest.json`
 (the OC0 vendored-contract lane; CI diffs vendored files). A Go parity test
-in `internal/platformmcp` asserts: exact roster (25/19), name-for-name
-schema equality (normalized JSON-Schema comparison), and annotation
-equality. A tool change lands TS-first, re-exports the manifest, re-vendors
-here, then the Go side goes green — the same one-way flow as the state wire
-contract.
+in `internal/platformmcp` asserts: exact roster, name-for-name schema
+equality (normalized JSON-Schema comparison), and annotation equality. A
+tool change lands TS-first, re-exports the manifest, re-vendors here, then
+the Go side goes green — the same one-way flow as the state wire contract.
+
+**Parity is over the tools this plane advertises, not the manifest's whole
+roster.** The TS plane serves some tools this repo already serves natively:
+orun-cloud IN9 added four work-plane reads (`initiatives_list`,
+`initiative_tree`, `task_get`, `activity_get`) so that hosted agents on the
+remote MCP — which have no orun binary, and so no work plane at all — can
+reach the work fold. Locally `internal/workmcp` already owns those names.
+
+So the manifest carries 29 tools and `internal/platformmcp` advertises 25
+(19 reads + 6 writes), ceding the four via `cededToWorkPlane`. The platform
+counts elsewhere in this spec are that advertised 25/19 and did not move
+when the manifest grew. Ceding is load-bearing twice over: `checkRoster`
+rejects a duplicated name outright (§2), and this plane has no
+implementation for those four, so advertising them would promise a tool it
+cannot serve. Re-vendor procedure and drift guards:
+`specs/orun-cloud/vendored/README.md`.
 
 ## 5. What deliberately does not change
 

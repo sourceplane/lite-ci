@@ -163,6 +163,15 @@ credential** — RBAC, rate limits, audit, and metering apply exactly as they
 would to you. Results are one summary line plus compact JSON, byte-capped at
 64 KiB with cursor/`fromSeq` continuation.
 
+:::note Comparing this roster to the hosted MCP
+Orun Cloud's hosted MCP server also serves four work-plane reads —
+`initiatives_list`, `initiative_tree`, `task_get`, `activity_get` — because
+an agent connecting to it remotely has no orun binary, and so no work plane.
+Here you have both planes, so those four come from the work plane above and
+the platform plane cedes them. Same names, same shapes; only the provider
+behind them differs.
+:::
+
 ### Orientation
 
 | Tool | Purpose |

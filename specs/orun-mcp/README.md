@@ -62,7 +62,7 @@ one product surface.
 
 | In scope | Out of scope |
 |----------|--------------|
-| The unified local server (provider composition over one stdio loop); the native Go platform tool plane and its `remotestate` wire methods; manifest vendor + parity test; `--read-only` and context-dependent mounting; website CLI doc; the release | The work MCP's tool semantics (WP5 — consumed as a provider, unchanged); the remote Streamable-HTTP transport (`apps/mcp-worker`, stays TS); the TS tool plane itself (stays, as contract source + remote implementation); new tool domains (the 25-tool budget and decision-8 boundaries are `saas-mcp-server`'s to evolve); agent-driver wiring (`orun-agents-live` — it consumes the one endpoint) |
+| The unified local server (provider composition over one stdio loop); the native Go platform tool plane and its `remotestate` wire methods; manifest vendor + parity test; `--read-only` and context-dependent mounting; website CLI doc; the release | The work MCP's tool semantics (WP5 — consumed as a provider, unchanged); the remote Streamable-HTTP transport (`apps/mcp-worker`, stays TS); the TS tool plane itself (stays, as contract source + remote implementation); new tool domains (the TS plane's tool budget — 29 as of IN9, of which this repo advertises 25 and cedes 4 to the work plane — and the decision-8 boundaries are `saas-mcp-server`'s to evolve); agent-driver wiring (`orun-agents-live` — it consumes the one endpoint) |
 
 ## Cross-repo pairing
 

@@ -1,8 +1,12 @@
 // Package platformmcp is the platform tool plane of the orun MCP
-// (orun-mcp UM1+UM2): the 25 tools of the shipped TS plane (19 reads + 6
-// writes, orun-cloud/packages/mcp), reimplemented natively over the public
-// API via internal/remotestate. The stdio transport lives in
-// internal/mcpserve; this package supplies the tools.
+// (orun-mcp UM1+UM2): the tools of the shipped TS plane
+// (orun-cloud/packages/mcp), reimplemented natively over the public API via
+// internal/remotestate. The stdio transport lives in internal/mcpserve; this
+// package supplies the tools.
+//
+// The vendored manifest carries 29 tools (23 reads + 6 writes); this plane
+// advertises 25 of them (19 reads + 6 writes) because four work-plane reads
+// are ceded to internal/workmcp — see cededToWorkPlane.
 //
 // Tool names, descriptions, input schemas, and annotations are EMBEDDED from
 // the vendored contract (specs/orun-cloud/vendored/mcp-tool-manifest.json —
@@ -65,6 +69,28 @@ type manifest struct {
 	Prompts           []manifestPrompt   `json:"prompts"`
 }
 
+// cededToWorkPlane names the vendored tools this plane does NOT advertise
+// because internal/workmcp already serves them natively over local work
+// state. The TS plane added them (orun-cloud IN9) for hosted agents reaching
+// the remote MCP, which have no orun binary and so no work plane at all;
+// here the work provider answers them from the fold directly.
+//
+// Ceding is not merely cosmetic. mcpserve.checkRoster rejects a roster
+// carrying one name twice, so without this filter `orun mcp serve` fails at
+// startup the moment both planes mount. And the platform provider has no
+// implementation for these four — p.call would fall through to "unknown
+// tool" — so advertising them would promise a tool this plane cannot serve.
+//
+// A name that leaves the TS manifest leaves this set stale but harmless;
+// parity_test.go asserts every entry still resolves, so the staleness is a
+// test failure rather than an init-time panic that would brick the binary.
+var cededToWorkPlane = map[string]bool{
+	"initiatives_list": true,
+	"initiative_tree":  true,
+	"task_get":         true,
+	"activity_get":     true,
+}
+
 // toolSpec is one advertised tool: the manifest entry plus what the dispatch
 // layer needs (workspace-argument shape for the default fill, read/write for
 // the --read-only filter).
@@ -75,9 +101,10 @@ type toolSpec struct {
 	workspaceRequired bool
 }
 
-// embedded is the parsed manifest; allTools the plane's full tool roster
-// (19 reads + 6 writes), in manifest order. Resources and prompts come off
-// embedded directly (resources.go / prompts.go).
+// embedded is the parsed manifest; allTools the plane's advertised roster
+// (19 reads + 6 writes — the manifest's 29 less the 4 ceded to the work
+// plane), in manifest order. Resources and prompts come off embedded
+// directly (resources.go / prompts.go).
 var embedded = mustParseManifest()
 
 var allTools = mustLoadTools(embedded)
@@ -99,7 +126,7 @@ func mustParseManifest() manifest {
 }
 
 func mustLoadTools(m manifest) []toolSpec {
-	reads := 0
+	reads, ceded := 0, 0
 	out := make([]toolSpec, 0, len(m.Tools))
 	for _, t := range m.Tools {
 		spec := toolSpec{manifestTool: t}
@@ -120,11 +147,18 @@ func mustLoadTools(m manifest) []toolSpec {
 				spec.workspaceRequired = true
 			}
 		}
+		if cededToWorkPlane[t.Name] {
+			ceded++
+			continue
+		}
 		out = append(out, spec)
 	}
-	if len(out) != m.ToolCount || reads != m.ReadOnlyToolCount {
+	// The manifest's own integrity is checked over the full roster — ceding
+	// removes tools from what this plane advertises, never from the contract
+	// it was handed.
+	if len(out)+ceded != m.ToolCount || reads != m.ReadOnlyToolCount {
 		panic(fmt.Sprintf("platformmcp: embedded manifest advertises %d tools (%d read-only) but carries %d (%d read-only)",
-			m.ToolCount, m.ReadOnlyToolCount, len(out), reads))
+			m.ToolCount, m.ReadOnlyToolCount, len(out)+ceded, reads))
 	}
 	return out
 }
