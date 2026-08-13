@@ -66,7 +66,7 @@
     }
   ],
   "protocolRevision": "2025-06-18",
-  "readOnlyToolCount": 23,
+  "readOnlyToolCount": 25,
   "resources": [
     {
       "description": "One catalog entity as markdown: identity, owner, relations, provenance, doc index, and the overview doc body (byte-capped). `entityKey` is base64url(entityRef). The agent-facing twin of the entity page; use `catalog_search` to find refs.",
@@ -83,7 +83,7 @@
   ],
   "serverName": "orun-cloud",
   "source": "@saas/mcp",
-  "toolCount": 29,
+  "toolCount": 31,
   "tools": [
     {
       "annotations": {
@@ -1042,6 +1042,67 @@
       },
       "name": "activity_get",
       "title": "Read tagged work activity"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Every skill's latest revision: name, content-addressed rev (sha256 of the canonical body — pin it; sessions record the revisions they ran under and the PR manifest names them), and source (default = shipped with Sourceplane, org = published over it; an org revision shadows the default of its name). Fetch a body with `skill_get`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "skills_list",
+      "title": "List skills (the hosted playbooks)"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "One skill's body and frontmatter — the latest revision, or exactly the one `rev` pins (sha256:<hex> from `skills_list` or a PR manifest). Follow what it says; record the rev you ran under.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Skill name (from `skills_list`), e.g. milestone-loop.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "rev": {
+            "description": "Exact revision to pin (optional; latest otherwise).",
+            "pattern": "^sha256\\:",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "skill_get",
+      "title": "Get a skill (body + frontmatter)"
     },
     {
       "annotations": {

@@ -158,6 +158,11 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 			}
 			mcpConfigPath = setup.ConfigPath
 			drv = &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
+			// IS6: the playbooks land beside the hands — hosted skills
+			// materialize as native skill files; the pins ride skills.json
+			// into the PR manifest. Best-effort: a cloud miss warns, never
+			// bricks the run.
+			materializeHarnessSkills(ctx, "", "", ".", cmd.ErrOrStderr())
 		}
 		branch := ""
 		if runTask != "" {

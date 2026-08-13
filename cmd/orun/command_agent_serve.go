@@ -278,6 +278,14 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 			if abs, aErr := filepath.Abs(mcpConfigPath); aErr == nil {
 				mcpConfigPath = abs
 			}
+			// IS6: hosted skills materialize into the harness workdir as
+			// native skill files (the checkout on a grounded session);
+			// pins recorded for the PR manifest. Best-effort by design.
+			skillWorkdir := workdir
+			if skillWorkdir == "" {
+				skillWorkdir = "."
+			}
+			materializeHarnessSkills(ctx, "", "", skillWorkdir, errOut)
 			cc := &driver.ClaudeCode{ExtraArgs: append(setup.HarnessArgs(), harnessModelArgs(typeModel)...)}
 			// GS1: seed a token for tools that read GITHUB_TOKEN (gh, API
 			// callers). Compatibility only — git itself never reads this; it
