@@ -389,9 +389,25 @@ type CreateWorkDesignRequest struct {
 
 // CreateWorkDesign creates a Draft design under an initiative; the cloud
 // seals the context (catalog digest + log cursors) server-side.
+//
+// Deprecated: WK3 moved design creation into the Epic — the initiative
+// route answers the typed subject_retired verdict naming candidates. Use
+// CreateEpicDesign. Kept because the alias surface never dies (WK-6).
 func (c *Client) CreateWorkDesign(ctx context.Context, initiativeKey string, req CreateWorkDesignRequest) (*WorkMutationResponse, error) {
 	var resp WorkMutationResponse
 	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(initiativeKey)+"/designs"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateEpicDesign creates a Draft design INSIDE an epic (WK3 §4.1): the
+// epic is the parent; the initiative derives from the epic's own partOf.
+// The proposal is the ladder shape — milestones[] + taskSkeletons[]; the
+// retired epics[] mint-tree is refused at adoption with a typed verdict.
+func (c *Client) CreateEpicDesign(ctx context.Context, epicKey string, req CreateWorkDesignRequest) (*WorkMutationResponse, error) {
+	var resp WorkMutationResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(epicKey)+"/designs"), req, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -1071,6 +1087,9 @@ type ArchiveInitiativeResponse struct {
 
 // SetInitiativeArchived archives or unarchives an initiative — a view
 // concern, independent of status (design §1).
+//
+// Deprecated: WK2 retired the initiative as a state subject; archive epics
+// via SetEpicArchived. Kept because the alias surface never dies (WK-6).
 func (c *Client) SetInitiativeArchived(ctx context.Context, key string, archived bool) (*ArchiveInitiativeResponse, error) {
 	action := "/archive"
 	if !archived {
@@ -1078,6 +1097,256 @@ func (c *Client) SetInitiativeArchived(ctx context.Context, key string, archived
 	}
 	var resp ArchiveInitiativeResponse
 	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/initiatives/"+urlSegment(key)+action), struct{}{}, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── orun-work-spaces (WK1–WK4): the Space, and the machine on the Epic ──────
+//
+// The initiative retired to a Space — a key namespace (prefix, title,
+// advisory owner team) that carries no status, health or dates; those live
+// on the Epic (WK2). The initiative-named methods above keep working: reads
+// serve forever, state writes answer the typed subject_retired verdict
+// naming these routes (R-2).
+
+// WorkSpaceView is the namespace record (WK1). The bare prefix IS the
+// Space's canonical key; the ini_ machine rail never renames (IS-C).
+type WorkSpaceView struct {
+	Prefix      string `json:"prefix"`
+	PublicID    string `json:"publicId,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	OwnerTeamID string `json:"ownerTeamId,omitempty"`
+	EpicCount   int    `json:"epicCount"`
+	Archived    bool   `json:"archived,omitempty"`
+}
+
+// WorkSpaces is the namespace roster (GET /work/spaces).
+type WorkSpaces struct {
+	Spaces []WorkSpaceView `json:"spaces"`
+}
+
+// ListSpaces fetches the Space roster; archived=true lists retired ones.
+func (c *Client) ListSpaces(ctx context.Context, archived bool) (*WorkSpaces, error) {
+	path := c.workPath("/spaces")
+	if archived {
+		path += "?archived=true"
+	}
+	var resp WorkSpaces
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkSpaceDetail is one Space plus its epics as context rows — the
+// state-bearing rows come from ListEpics.
+type WorkSpaceDetail struct {
+	Space WorkSpaceView `json:"space"`
+	Epics []struct {
+		Key        string `json:"key"`
+		Title      string `json:"title"`
+		TargetDate string `json:"targetDate,omitempty"`
+	} `json:"epics"`
+}
+
+// GetSpace fetches one Space by prefix (GET /work/spaces/{prefix}).
+func (c *Client) GetSpace(ctx context.Context, prefix string) (*WorkSpaceDetail, error) {
+	var resp WorkSpaceDetail
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/spaces/"+urlSegment(prefix)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateWorkSpaceRequest opens a namespace. The prefix auto-suggests from
+// the title when omitted; once used it is never re-mintable (IS-C).
+type CreateWorkSpaceRequest struct {
+	Prefix      string `json:"prefix,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	OwnerTeamID string `json:"ownerTeamId,omitempty"`
+}
+
+// CreateWorkSpaceResponse carries the created Space.
+type CreateWorkSpaceResponse struct {
+	Key   string        `json:"key"`
+	Seq   int64         `json:"seq"`
+	Space WorkSpaceView `json:"space"`
+}
+
+// CreateSpace opens a Space (POST /work/spaces).
+func (c *Client) CreateSpace(ctx context.Context, req CreateWorkSpaceRequest) (*CreateWorkSpaceResponse, error) {
+	var resp CreateWorkSpaceResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/spaces"), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PatchWorkSpaceRequest edits the namespace record. OwnerTeamID uses a
+// pointer so null (clear) and absent (keep) stay distinct on the wire.
+type PatchWorkSpaceRequest struct {
+	Title       string  `json:"title,omitempty"`
+	Description string  `json:"description,omitempty"`
+	OwnerTeamID *string `json:"ownerTeamId,omitempty"`
+}
+
+// PatchSpaceResponse carries the updated Space.
+type PatchSpaceResponse struct {
+	Key   string        `json:"key,omitempty"`
+	Seq   int64         `json:"seq"`
+	Space WorkSpaceView `json:"space"`
+}
+
+// PatchSpace edits a Space (PATCH /work/spaces/{prefix}). The prefix and
+// the machine rail are not editable — identity survives every relabel.
+func (c *Client) PatchSpace(ctx context.Context, prefix string, req PatchWorkSpaceRequest) (*PatchSpaceResponse, error) {
+	var resp PatchSpaceResponse
+	if err := c.doJSON(ctx, http.MethodPatch, c.workPath("/spaces/"+urlSegment(prefix)), req, &resp, false); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkEpicUpdateView is one posted epic update — health is the headline of
+// the latest update, never a formula (WK2 re-aims IS2 at the Epic).
+type WorkEpicUpdateView struct {
+	PublicID  string    `json:"publicId"`
+	Epic      string    `json:"epic"`
+	Health    string    `json:"health"`
+	Body      string    `json:"body"`
+	Author    WorkActor `json:"author"`
+	CreatedAt string    `json:"createdAt"`
+	EditedAt  string    `json:"editedAt,omitempty"`
+}
+
+// WorkEpicRow is one row of the Work home read (GET /work/epics): authored
+// state, asserted health, derived execution — three truth sources, each
+// named (WV-2). Intent and signals pass through raw for renderers.
+type WorkEpicRow struct {
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	Space *struct {
+		Prefix      string `json:"prefix"`
+		Title       string `json:"title"`
+		OwnerTeamID string `json:"ownerTeamId,omitempty"`
+	} `json:"space,omitempty"`
+	State        string              `json:"state"`
+	Health       string              `json:"health,omitempty"`
+	HealthStale  bool                `json:"healthStale,omitempty"`
+	LatestUpdate *WorkEpicUpdateView `json:"latestUpdate,omitempty"`
+	Signals      json.RawMessage     `json:"signals,omitempty"`
+	TargetDate   string              `json:"targetDate,omitempty"`
+	Intent       json.RawMessage     `json:"intent,omitempty"`
+	Execution    struct {
+		Total    int `json:"total"`
+		Complete int `json:"complete"`
+		Blocked  int `json:"blocked"`
+	} `json:"execution"`
+	TaskCount int  `json:"taskCount"`
+	Archived  bool `json:"archived,omitempty"`
+}
+
+// WorkEpics is the Work home read's payload.
+type WorkEpics struct {
+	Epics []WorkEpicRow `json:"epics"`
+}
+
+// WorkEpicsOptions filter the home read.
+type WorkEpicsOptions struct {
+	Space    string
+	State    string
+	Health   string
+	Archived bool
+}
+
+// ListEpics fetches the epic rows (GET /work/epics?space=&state=&health=).
+func (c *Client) ListEpics(ctx context.Context, opts WorkEpicsOptions) (*WorkEpics, error) {
+	q := url.Values{}
+	if opts.Space != "" {
+		q.Set("space", opts.Space)
+	}
+	if opts.State != "" {
+		q.Set("state", opts.State)
+	}
+	if opts.Health != "" {
+		q.Set("health", opts.Health)
+	}
+	if opts.Archived {
+		q.Set("archived", "true")
+	}
+	path := c.workPath("/epics")
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var resp WorkEpics
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetEpicStatus moves an epic through the stored five-state machine
+// (POST /work/epics/{key}/status) — byte-for-byte the IS2 machine on its
+// right subject. complete/cancel/reopen/restore stay human-only (IS-4);
+// paused/canceled closes the dispatch gate for member tasks (IS-M).
+func (c *Client) SetEpicStatus(ctx context.Context, key string, req SetInitiativeStatusRequest) (*SetInitiativeStatusResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp SetInitiativeStatusResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(key)+"/status"), req, &resp, req.ClientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PostEpicUpdateResponse carries the created epic update view.
+type PostEpicUpdateResponse struct {
+	Key      string             `json:"key"`
+	Seq      int64              `json:"seq"`
+	Update   WorkEpicUpdateView `json:"update"`
+	Replayed bool               `json:"replayed,omitempty"`
+}
+
+// PostEpicUpdate posts an attributed health update on an epic
+// (POST /work/epics/{key}/updates), stamping the headline.
+func (c *Client) PostEpicUpdate(ctx context.Context, key string, req PostInitiativeUpdateRequest) (*PostEpicUpdateResponse, error) {
+	if req.ClientToken == "" {
+		req.ClientToken = newClientToken()
+	}
+	var resp PostEpicUpdateResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(key)+"/updates"), req, &resp, req.ClientToken != ""); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WorkEpicUpdates is an epic's update feed, newest first.
+type WorkEpicUpdates struct {
+	Updates []WorkEpicUpdateView `json:"updates"`
+}
+
+// ListEpicUpdates fetches an epic's update feed.
+func (c *Client) ListEpicUpdates(ctx context.Context, key string) (*WorkEpicUpdates, error) {
+	var resp WorkEpicUpdates
+	if err := c.doJSON(ctx, http.MethodGet, c.workPath("/epics/"+urlSegment(key)+"/updates"), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetEpicArchived archives or unarchives an epic — a view concern,
+// independent of status (WK2; the machine never moves).
+func (c *Client) SetEpicArchived(ctx context.Context, key string, archived bool) (*ArchiveInitiativeResponse, error) {
+	action := "/archive"
+	if !archived {
+		action = "/unarchive"
+	}
+	var resp ArchiveInitiativeResponse
+	if err := c.doJSON(ctx, http.MethodPost, c.workPath("/epics/"+urlSegment(key)+action), struct{}{}, &resp, false); err != nil {
 		return nil, err
 	}
 	return &resp, nil

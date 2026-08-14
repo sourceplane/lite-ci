@@ -37,6 +37,86 @@ type fakeAPI struct {
 	verdicts  []string // collection/key=verdict
 	approvals []string // key@revision (approve) / key: note (revoke)
 	adoptions []string // adopt key / supersede key→by
+	// orun-work-spaces (WK4)
+	spaces     []string // create prefix / update prefix
+	epicStatus []string // key→to (the machine on its right subject)
+}
+
+func (f *fakeAPI) ListSpaces(context.Context, bool) (*remotestate.WorkSpaces, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkSpaces{Spaces: []remotestate.WorkSpaceView{{Prefix: "PAY", Title: "Payments", EpicCount: 2}}}, nil
+}
+func (f *fakeAPI) GetSpace(_ context.Context, prefix string) (*remotestate.WorkSpaceDetail, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	d := &remotestate.WorkSpaceDetail{Space: remotestate.WorkSpaceView{Prefix: prefix, Title: "Payments", EpicCount: 1}}
+	d.Epics = append(d.Epics, struct {
+		Key        string `json:"key"`
+		Title      string `json:"title"`
+		TargetDate string `json:"targetDate,omitempty"`
+	}{Key: "pay-tokens", Title: "Card tokenisation"})
+	return d, nil
+}
+func (f *fakeAPI) CreateSpace(_ context.Context, req remotestate.CreateWorkSpaceRequest) (*remotestate.CreateWorkSpaceResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	prefix := req.Prefix
+	if prefix == "" {
+		prefix = "PAY"
+	}
+	f.spaces = append(f.spaces, "create "+prefix)
+	return &remotestate.CreateWorkSpaceResponse{Key: prefix, Seq: 50, Space: remotestate.WorkSpaceView{Prefix: prefix, Title: req.Title}}, nil
+}
+func (f *fakeAPI) PatchSpace(_ context.Context, prefix string, _ remotestate.PatchWorkSpaceRequest) (*remotestate.PatchSpaceResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.spaces = append(f.spaces, "update "+prefix)
+	return &remotestate.PatchSpaceResponse{Key: prefix, Seq: 51, Space: remotestate.WorkSpaceView{Prefix: prefix, Title: "Payments"}}, nil
+}
+func (f *fakeAPI) ListEpics(context.Context, remotestate.WorkEpicsOptions) (*remotestate.WorkEpics, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkEpics{Epics: []remotestate.WorkEpicRow{{Key: "pay-tokens", Title: "Card tokenisation", State: "active", TaskCount: 3}}}, nil
+}
+func (f *fakeAPI) SetEpicStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.epicStatus = append(f.epicStatus, key+"→"+req.To)
+	out := &remotestate.SetInitiativeStatusResponse{Key: key, Seq: 52, Status: req.To}
+	if req.To == "completed" && !req.Force {
+		out.Warning = "2 member task(s) still open"
+	}
+	return out, nil
+}
+func (f *fakeAPI) PostEpicUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostEpicUpdateResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.updates = append(f.updates, key+": "+req.Health)
+	return &remotestate.PostEpicUpdateResponse{Key: key, Seq: 53, Update: remotestate.WorkEpicUpdateView{
+		PublicID: "upd_03", Epic: key, Health: req.Health, Body: req.Body,
+		Author: remotestate.WorkActor{Type: "agent", ID: "sp_1"}, CreatedAt: "2026-08-14T00:00:00Z",
+	}}, nil
+}
+func (f *fakeAPI) ListEpicUpdates(_ context.Context, key string) (*remotestate.WorkEpicUpdates, error) {
+	if f.failNext != nil {
+		return nil, f.failNext
+	}
+	return &remotestate.WorkEpicUpdates{Updates: []remotestate.WorkEpicUpdateView{{PublicID: "upd_03", Epic: key, Health: "on_track", Body: "steady"}}}, nil
+}
+func (f *fakeAPI) CreateEpicDesign(_ context.Context, epicKey string, req remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	if f.refuseWrites != nil {
+		return nil, f.refuseWrites
+	}
+	f.designs = append(f.designs, epicKey+"/"+req.Title)
+	return &remotestate.WorkMutationResponse{Key: "PAY-D1", Seq: 54}, nil
 }
 
 func (f *fakeAPI) GetWorkSummary(context.Context) (*remotestate.WorkSummary, error) {
@@ -442,8 +522,8 @@ func TestInitializeAndToolSurface(t *testing.T) {
 			t.Errorf("missing tool %s", want)
 		}
 	}
-	if len(tools) != 37 {
-		t.Errorf("tool surface = %d tools, want exactly 37 (closed: 17 reads + 20 writes — the epic's FULL roster, completed by pr_open in IS6)", len(tools))
+	if len(tools) != 45 {
+		t.Errorf("tool surface = %d tools, want exactly 45 (21 reads + 24 writes — IS6's 37 plus WK4's Space/epic names beside five IS-era aliases, visible one release then hidden-but-live per WK-6; steady state 40)", len(tools))
 	}
 	// The lie is unrepresentable: no lifecycle write, no pin (WP-3, WP-10).
 	// The sweep runs over the composed server's tools/list (the merged
@@ -505,6 +585,8 @@ func TestWireAnnotations(t *testing.T) {
 		"activity_get": true,
 		// IS4 + IS2b
 		"work_context": true, "work_now": true, "work_yours": true, "initiative_updates_get": true,
+		// orun-work-spaces (WK4)
+		"spaces_list": true, "space_get": true, "work_epics": true, "epic_updates_get": true,
 	}
 	for _, tool := range Tools() {
 		want := map[string]bool{
@@ -883,8 +965,11 @@ func TestIS4StateAndDecisions(t *testing.T) {
 	if _, isErr = resultText(t, responses[9]); isErr {
 		t.Fatalf("epic_revoke_approval errored: %v", responses[9])
 	}
+	// WK3 (§4.2): adoption mints the ladder INSIDE the design's own epic
+	// and drifts its approval by derivation — no epic is minted, no rev-0
+	// approval rides the signature anymore.
 	text, isErr = resultText(t, responses[10])
-	if isErr || !strings.Contains(text, "minted epics [checkout-epic]") || !strings.Contains(text, "approved at rev 0 under the same signature") {
+	if isErr || !strings.Contains(text, "minted milestones [checkout-epic]") || !strings.Contains(text, "approval drifts until re-approved") {
 		t.Fatalf("design_adopt result: %s", text)
 	}
 	if _, isErr = resultText(t, responses[11]); isErr {
