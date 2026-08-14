@@ -1,0 +1,85 @@
+{
+  "$comment": "Shared provenance rule-engine conformance (orun-initiatives-v2 IS7, design §9 / IS-G). Byte-identical twin of orun internal/provenance/fixtures/provenance-conformance.json — `orun pr check` (Go) and the cloud orun/compliance evaluator (TS) replay these cases and must emit exactly these findings, in exactly this order, with exactly these texts. ASCII-only inputs by convention: the two engines' quoting/truncation agree on ASCII; keep it that way. Change this file only in lockstep with BOTH engines (the worklens pattern, applied twice).",
+  "version": 1,
+  "cases": [
+    {
+      "name": "a clean pen leaves nothing to say",
+      "input": {
+        "branch": "orun/PAY-T14-route-the-reads",
+        "commitMessages": ["feat: route the reads\n\nOrun-Task: PAY-T14\n"],
+        "manifest": { "version": 1, "task": "PAY-T14" }
+      },
+      "findings": []
+    },
+    {
+      "name": "an off-grammar branch is the first finding",
+      "input": {
+        "branch": "feature/whatever",
+        "taskKey": "PAY-T14",
+        "manifest": { "version": 1, "task": "PAY-T14" }
+      },
+      "findings": [
+        { "level": "error", "rule": "branch-grammar", "text": "branch \"feature/whatever\" does not match orun/<task-key>-<slug>" }
+      ]
+    },
+    {
+      "name": "one task, one PR: the branch and the declared task must agree",
+      "input": {
+        "branch": "orun/PAY-T15-other-work",
+        "taskKey": "PAY-T14",
+        "manifest": { "version": 1, "task": "PAY-T14" }
+      },
+      "findings": [
+        { "level": "error", "rule": "one-task-one-pr", "text": "branch names PAY-T15 but the PR is for PAY-T14" }
+      ]
+    },
+    {
+      "name": "every commit carries the trailer, and for the SAME task",
+      "input": {
+        "branch": "orun/PAY-T14-route-the-reads",
+        "commitMessages": [
+          "feat: no trailer here",
+          "fix: wrong task\n\nOrun-Task: PAY-T15\n"
+        ],
+        "manifest": { "version": 1, "task": "PAY-T14" }
+      },
+      "findings": [
+        { "level": "error", "rule": "task-trailer", "text": "commit \"feat: no trailer here\" lacks the Orun-Task trailer (orun githooks install adds it)" },
+        { "level": "error", "rule": "one-task-one-pr", "text": "commit \"fix: wrong task\" is trailed for PAY-T15, not PAY-T14" }
+      ]
+    },
+    {
+      "name": "no manifest is a warning - pr open writes it",
+      "input": {
+        "branch": "orun/WRK-9"
+      },
+      "findings": [
+        { "level": "warn", "rule": "manifest", "text": "no manifest block — `orun pr open` writes it; the compliance check will flag its absence" }
+      ]
+    },
+    {
+      "name": "a manifest must be coherent: known version, the same task, pins named when recorded",
+      "input": {
+        "branch": "orun/PAY-T14-route-the-reads",
+        "manifest": { "version": 2, "task": "PAY-T15" },
+        "hasSkillPins": true
+      },
+      "findings": [
+        { "level": "error", "rule": "manifest", "text": "manifest version 2 is not 1" },
+        { "level": "error", "rule": "one-task-one-pr", "text": "manifest names PAY-T15, not PAY-T14" },
+        { "level": "warn", "rule": "skill-pins", "text": "the session recorded skill pins but the manifest names none" }
+      ]
+    },
+    {
+      "name": "a long first line truncates at 57 with an ellipsis",
+      "input": {
+        "branch": "orun/PAY-T14-x",
+        "commitMessages": ["feat: this commit subject line just keeps going and going and going far past sixty characters"],
+        "manifest": { "version": 1, "task": "PAY-T14" }
+      },
+      "findings": [
+        { "level": "error", "rule": "task-trailer", "text": "commit \"feat: this commit subject line just keeps going and going…\" lacks the Orun-Task trailer (orun githooks install adds it)" }
+      ]
+    }
+  ]
+}
