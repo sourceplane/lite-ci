@@ -541,8 +541,8 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 63 {
-		t.Fatalf("merged roster = %d tools, want 63 (36 work + 27 platform — IS5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 64 {
+		t.Fatalf("merged roster = %d tools, want 64 (37 work + 27 platform — IS6)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -571,7 +571,7 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (63 → 57); the 36 work tools stay — they are mutator-shaped by
+// writes (64 → 58); the 37 work tools stay — they are mutator-shaped by
 // WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
 // blocked at execution too, not just delisted.
 func TestComposedServerReadOnly(t *testing.T) {
@@ -599,8 +599,8 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 57 {
-		t.Fatalf("read-only roster = %d tools, want 57 (36 work + 21 platform reads — IS5)", len(toolsResp.Result.Tools))
+	if len(toolsResp.Result.Tools) != 58 {
+		t.Fatalf("read-only roster = %d tools, want 58 (37 work + 21 platform reads — IS6)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
@@ -609,15 +609,16 @@ func TestComposedServerReadOnly(t *testing.T) {
 			strings.HasPrefix(tool.Name, "epic_") || strings.HasPrefix(tool.Name, "design_") ||
 			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") ||
 			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") ||
-			strings.HasPrefix(tool.Name, "item_") || strings.HasPrefix(tool.Name, "review_") {
+			strings.HasPrefix(tool.Name, "item_") || strings.HasPrefix(tool.Name, "review_") ||
+			strings.HasPrefix(tool.Name, "pr_") {
 			workCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 36 {
-		t.Errorf("work tools under --read-only = %d, want 36 (mutator-shaped, unaffected — IS4+IS2b)", workCount)
+	if workCount != 37 {
+		t.Errorf("work tools under --read-only = %d, want 37 (mutator-shaped, unaffected — IS6)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])

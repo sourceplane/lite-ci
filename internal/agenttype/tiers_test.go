@@ -29,7 +29,7 @@ func TestShippedTierMatrices(t *testing.T) {
 	// tools (Read, Bash, …) are capitalized and catalog_*/connection_info
 	// live with other providers.
 	workPrefixes := []string{"work_", "task_", "spec_", "epic_", "milestone_",
-		"design_", "initiative", "item_", "activity_", "contract_", "review_"}
+		"design_", "initiative", "item_", "activity_", "contract_", "review_", "pr_"}
 
 	for _, typeName := range []string{"implementer", "orchestrator", "bootstrapper", "initiative-owner"} {
 		d, issues := LoadNamed(typeName)

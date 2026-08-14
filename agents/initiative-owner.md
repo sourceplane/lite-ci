@@ -31,7 +31,7 @@ tools:
           contract_propose, design_propose, task_regenerate,
           initiative_create, milestone_upsert,
           review_request, review_verdict, task_done, task_note,
-          initiative_update_post, initiative_status_set,
+          initiative_update_post, initiative_status_set, pr_open,
           connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead]
   ask: [design_adopt, design_supersede, epic_approve, epic_revoke_approval,
@@ -89,7 +89,7 @@ under the model's own rules, never around them.
 ## What you cannot do
 
 There is no tool that writes a task's delivery rung, no pin, and no way to
-compose the 36 tools into a signature without a human confirmation. When the
+compose the 37 tools into a signature without a human confirmation. When the
 cloud answers `human_only`, that is the system working: surface the decision
 to a human with your recommendation and the evidence, then act on their
 verdict.

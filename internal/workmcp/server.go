@@ -32,6 +32,7 @@ import (
 	"fmt"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/workbrief"
 	"github.com/sourceplane/orun/internal/worklens"
@@ -89,11 +90,19 @@ type WorkAPI interface {
 	SupersedeDesign(ctx context.Context, key string, req remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error)
 }
 
+// ProvenancePen is the pr_open seam (IS6): the side-effectful pen mounted
+// when the serve runs inside a repository workspace; nil otherwise (the
+// tool then answers with a clear verdict instead of guessing at git).
+type ProvenancePen interface {
+	Open(ctx context.Context, req provenance.OpenRequest) (*provenance.OpenResult, error)
+}
+
 // Server is the work-plane mcpserve.ToolProvider for one workspace-scoped
 // client.
 type Server struct {
 	API       WorkAPI
 	Workspace string
+	Pen       ProvenancePen
 }
 
 func obj(props map[string]interface{}, required ...string) map[string]interface{} {
@@ -133,10 +142,9 @@ func ReadOnly(name string) bool {
 	return false
 }
 
-// Tools returns the closed tool surface. Note what is absent: no
-// task-rung write (no lifecycle write exists anywhere), no pin. One
-// deferral remains, tracked in the epic's IMPLEMENTATION-STATUS: pr_open
-// (the provenance pen) rides IS6 — the roster reaches its full 37 there.
+// Tools returns the closed tool surface — the FULL 37 of the epic
+// (17 reads + 20 writes). Note what is absent, forever: no task-rung
+// write (no lifecycle write exists anywhere), no pin.
 //
 // Wire annotations (orun-mcp UM4). The reads are the plain truth:
 // readOnly/non-destructive/idempotent. The write tools are readOnly:false,
@@ -211,6 +219,8 @@ func Tools() []mcpserve.ToolDef {
 		{Name: "design_supersede", Description: "Supersede a design — retire it, optionally naming the design that replaces it. Human-only server-side; ask-tier in every agent policy.", InputSchema: obj(map[string]interface{}{"key": str("design key to supersede"), "by": str("the replacing design key (optional)"), "note": str("why (optional)")}, "key"), Annotations: writeAnn},
 		{Name: "epic_approve", Description: "Approve an epic at a revision — seals the EpicSnapshot brief (the frozen dispatch artifact) and opens the dispatch gate. Re-approval after drift pins the new revision. Human-only server-side; ask-tier in every agent policy (the confirmation is the signature).", InputSchema: obj(map[string]interface{}{"key": str("epic slug"), "revision": str("doc revision sha256:<hex> to approve"), "minApprovals": map[string]interface{}{"type": "integer", "description": "required approving verdicts (optional)"}}, "key", "revision"), Annotations: writeAnn},
 		{Name: "epic_revoke_approval", Description: "Revoke an epic's approval with the mandatory note saying why — closes the dispatch gate. Human-only server-side; ask-tier in every agent policy.", InputSchema: obj(map[string]interface{}{"key": str("epic slug"), "note": str("why the approval is withdrawn (required)")}, "key", "note"), Annotations: writeAnn},
+		// orun-initiatives-v2 (IS6) — the provenance pen completes the 37.
+		{Name: "pr_open", Description: "Open the task's PR with its lineage written by the pen: the branch renamed onto the grammar (orun/<task-key>-<slug>) when needed, pushed, and the machine-readable manifest block in the body — the task, the skill revisions this session ran under, the session id. With a GitHub credential ambient the PR opens via the API; without one the pen prepares everything and returns the compare URL plus the body to use — honest either way. One task, one PR.", InputSchema: obj(map[string]interface{}{"task": str("the task this PR closes"), "title": str("PR title (optional; default the task key)"), "base": str("base branch (optional; default main)"), "draft": map[string]interface{}{"type": "boolean", "description": "open as a draft (optional)"}}, "task"), Annotations: writeAnn},
 	}
 }
 
@@ -865,6 +875,28 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 			return nil, err
 		}
 		return toolText(fmt.Sprintf("approval revoked on %s (event seq %d) — the dispatch gate is closed", out.Key, out.Seq), false), nil
+
+	case "pr_open":
+		var a struct {
+			Task  string `json:"task"`
+			Title string `json:"title"`
+			Base  string `json:"base"`
+			Draft bool   `json:"draft"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Task == "" {
+			return nil, fmt.Errorf("pr_open: task is required — a PR opens FOR a task")
+		}
+		if s.Pen == nil {
+			return nil, fmt.Errorf("pr_open: no repository workspace mounted in this serve — run `orun pr open --task %s` from the checkout instead", a.Task)
+		}
+		out, err := s.Pen.Open(ctx, provenance.OpenRequest{TaskKey: a.Task, Title: a.Title, Base: a.Base, Draft: a.Draft})
+		if err != nil {
+			return nil, err
+		}
+		if out.Opened {
+			return toolText(fmt.Sprintf("opened %s (branch %s) — the manifest rides the body", out.URL, out.Branch), false), nil
+		}
+		return toolText(fmt.Sprintf("branch %s pushed; no GitHub credential ambient — open it here: %s\n\nbody to use:\n%s", out.Branch, out.CompareURL, out.Body), false), nil
 
 	default:
 		return nil, fmt.Errorf("unknown tool %s", name)

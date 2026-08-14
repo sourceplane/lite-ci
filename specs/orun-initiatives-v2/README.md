@@ -23,7 +23,7 @@ task a live, rate-clamped, fold-inert *now* line (`task_note` /
 
 | Field | Value |
 |-------|-------|
-| Status | **In flight — IS6** (IS4 ✅ #618/#619/#620 — roster 36; IS5 cloud ✅ orun-cloud#918; this slice: skills clients + `orun skills list\|pull` + agent-run materialization + manifest re-vendor; IS6b brings `orun pr open\|check\|link` + `pr_open` → 37) |
+| Status | **In flight — IS6b** (IS4 ✅, IS5 ✅, IS6a ✅ #621; this slice: the provenance pen — `orun pr open\|check\|link`, `pr_open` completing the roster at **37**, `orun githooks install`; IS7 compliance App next) |
 | Builds on | `specs/orun-work/` (v2 fold + two logs), `specs/orun-work-v4/` (hierarchy, human-only sealed approval, drift), `specs/orun-initiatives/` (the 21-tool roster, `orun initiatives` group) |
 | Coordinates with | orun-cloud `specs/epics/orun-initiatives-v2/` (authoritative: schema, endpoints, compliance App, skills registry, console) |
 | Wire | `/v1/organizations/{org}/work/*` — unchanged prefix, additive only (IN-A carried) |

@@ -24,7 +24,7 @@ tools:
           initiatives_list, initiative_tree, task_get, activity_get,
           work_context, work_now, work_yours, initiative_updates_get,
           catalog_get_component, catalog_affected, task_comment,
-          task_note, task_done, connection_info,
+          task_note, task_done, pr_open, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead]
   ask: [contract_propose, task_assign, item_assign, review_request,
         Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
