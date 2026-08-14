@@ -88,6 +88,19 @@ type WorkAPI interface {
 	RevokeEpicApproval(ctx context.Context, key, note string) (*remotestate.WorkMutationResponse, error)
 	AdoptDesign(ctx context.Context, key string, req remotestate.AdoptDesignRequest) (*remotestate.AdoptDesignResponse, error)
 	SupersedeDesign(ctx context.Context, key string, req remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error)
+	// orun-work-spaces (WK1–WK4) — the Space names and the machine on the
+	// Epic. The initiative-named methods above stay on the seam forever
+	// (WK-6): reads serve, state writes answer the typed subject_retired
+	// verdict naming these routes (R-2).
+	ListSpaces(ctx context.Context, archived bool) (*remotestate.WorkSpaces, error)
+	GetSpace(ctx context.Context, prefix string) (*remotestate.WorkSpaceDetail, error)
+	CreateSpace(ctx context.Context, req remotestate.CreateWorkSpaceRequest) (*remotestate.CreateWorkSpaceResponse, error)
+	PatchSpace(ctx context.Context, prefix string, req remotestate.PatchWorkSpaceRequest) (*remotestate.PatchSpaceResponse, error)
+	ListEpics(ctx context.Context, opts remotestate.WorkEpicsOptions) (*remotestate.WorkEpics, error)
+	SetEpicStatus(ctx context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error)
+	PostEpicUpdate(ctx context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostEpicUpdateResponse, error)
+	ListEpicUpdates(ctx context.Context, key string) (*remotestate.WorkEpicUpdates, error)
+	CreateEpicDesign(ctx context.Context, epicKey string, req remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error)
 }
 
 // ProvenancePen is the pr_open seam (IS6): the side-effectful pen mounted
@@ -186,18 +199,26 @@ func Tools() []mcpserve.ToolDef {
 		{Name: "milestone_get", Description: "One epic's milestone ladder: authored goals/done-when plus DERIVED progress per milestone — read-only.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug")}, "epic"), Annotations: readAnn},
 		{Name: "design_get", Description: "One design: doc pointer, sealed context (what it assumed), structured proposal, and folded intent state — read-only.", InputSchema: obj(map[string]interface{}{"key": str("design key, e.g. DSG-1")}, "key"), Annotations: readAnn},
 		{Name: "initiative_get", Description: "One initiative's DERIVED rollup: health with named evidence, progress, per-epic intent + execution. Nothing returned is enterable.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key")}, "initiative"), Annotations: readAnn},
-		{Name: "design_propose", Description: "Create a Draft design under an initiative: a document reference plus a structured proposal (epics → milestones → task skeletons). A design is a PROPOSAL — humans review, compare, and adopt; adoption mints epics and is not available here.", InputSchema: obj(map[string]interface{}{"initiative": str("initiative key"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{epics: [{slug, title, docSeed?, milestones[], taskSkeletons[]}]}"}}, "initiative", "title"), Annotations: writeAnn},
+		{Name: "design_propose", Description: "Create a Draft design INSIDE an epic (WK3 §4.2): a document reference plus the proposed milestone ladder + task skeletons for the epic's fixed scope. A design is a PROPOSAL — humans review, compare, and adopt; adoption mints the ladder inside the design's own epic and is not available here. The pre-WK3 epics[] mint-tree shape is retired: readable history, never adoptable.", InputSchema: obj(map[string]interface{}{"epic": str("epic key the design lives in (from work_epics)"), "title": str("design title"), "docRef": str("design doc revision sha256:<hex> (optional)"), "proposal": map[string]interface{}{"type": "object", "description": "{milestones: [{key, title, goal?, doneWhen?, ordinal}], taskSkeletons: [{title, milestone?}]}"}}, "epic", "title"), Annotations: writeAnn},
 		{Name: "task_regenerate", Description: "Re-plan one milestone in one verdict batch: PLANNED (draft/ready) tasks cancel, in-flight tasks survive, and every proposed contract is applied AND flagged for human review. Tasks are implementation detail (V4-5) — this never touches the epic's approval.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "milestone": str("milestone key, e.g. M1"), "prefix": str("task-key prefix (default WK)"), "tasks": map[string]interface{}{"type": "array", "items": obj(map[string]interface{}{"title": str("task title"), "contract": contractSchema}, "title"), "description": "the replacement plan"}}, "epic", "milestone", "tasks"), Annotations: writeAnn},
 		// orun-initiatives (IN5) — the portfolio surface: four derived
 		// reads and two envelope writes. STILL absent, on purpose: no
 		// approve, no adopt, no supersede, no pin — those are human-only
 		// decisions with no tool to name them; a write that brushes one
 		// gets the cloud's typed human_only verdict, surfaced verbatim.
-		{Name: "initiatives_list", Description: "The portfolio in one read: every initiative with DERIVED status (planning until the first approved epic, the health fold afterwards), two-segment progress (done/active/total), the needs-you reasons that wait on a human, agent assignees, epic rows with intent state, design rows, plus workspace fold-stats. Nothing returned is a stored status.", InputSchema: obj(map[string]interface{}{}), Annotations: readAnn},
-		{Name: "initiative_tree", Description: "One initiative's full hierarchy — the world to plan against: epics with intent state and approved revision (drift named), milestones with derived state (complete/active/upcoming) and progress, tasks with rungs and delivery evidence, docs with revisions and open threads, and the initiative's design runs.", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
+		// orun-work-spaces (WK4) — the Space names land; the IS-era
+		// initiative names below survive as deprecated aliases (one release
+		// visible, then hidden but never removed — WK-6).
+		{Name: "spaces_list", Description: "The work plane's namespaces in one read: every Space (prefix, title, advisory owner team, epic count). A Space is where keys are minted and epics are filed — it carries NO status, health or dates; those live on the epics (work_epics). Pass archived=true for retired Spaces.", InputSchema: obj(map[string]interface{}{"archived": map[string]interface{}{"type": "boolean", "description": "list retired/archived Spaces (optional)"}}), Annotations: readAnn},
+		{Name: "space_get", Description: "One Space — the namespace record (prefix, title, description, advisory owner team) plus its epics as context rows (key, title, target date). The state-bearing epic rows come from work_epics; this answers \"what is filed here\". Replaces initiative_tree, which folded a level that no longer exists.", InputSchema: obj(map[string]interface{}{"prefix": str("the Space's prefix — its canonical key (e.g. PAY)")}, "prefix"), Annotations: readAnn},
+		{Name: "work_epics", Description: "The Work home read: every epic row with its three truth sources named (WV-2) — authored state, asserted health (staleness derived at read), derived execution (total/complete/blocked) — plus the Space band, target date, latest update and per-epic signals. Filter by space/state/health; archived=true for the shelf.", InputSchema: obj(map[string]interface{}{"space": str("filter to one Space prefix (optional)"), "state": str("planning | active | paused | completed | canceled (optional)"), "health": str("on_track | at_risk | off_track (optional)"), "archived": map[string]interface{}{"type": "boolean", "description": "list archived epics (optional)"}}), Annotations: readAnn},
+		{Name: "initiatives_list", Description: "DEPRECATED alias (WK4) — prefer spaces_list for orientation and work_epics for state: the initiative retired to a Space. This read keeps serving the full portfolio fold unchanged (reads never break, WK-6) and hides next release.", InputSchema: obj(map[string]interface{}{}), Annotations: readAnn},
+		{Name: "initiative_tree", Description: "DEPRECATED alias (WK4) — prefer space_get for the namespace and work_epics for state: the tree folded a level that no longer exists. Keeps serving unchanged (WK-6) and hides next release.", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
 		{Name: "task_get", Description: "One task's whole page: the task view (derived rung with evidence, contract, pins), its ancestry (initiative/epic/milestone), the folded delivery evidence (branch, PR, checks), components affected (observation diffstats — empty when the world reported none, never invented), and the task-scoped activity tail, newest first.", InputSchema: obj(map[string]interface{}{"key": str("task key, e.g. ORN-142")}, "key"), Annotations: readAnn},
 		{Name: "activity_get", Description: "The tagged activity tail for any noun: both logs folded into one reverse-chronological list of neutral server sentences. The tag trail is ancestry — filtering by an epic covers its milestones' tasks, docs, and designs; an initiative covers its whole subtree. Omit tag for the workspace-wide tail; page with cursor.", InputSchema: obj(map[string]interface{}{"tag": str("item key to filter by, ancestry included (optional)"), "limit": map[string]interface{}{"type": "integer", "description": "maximum entries to return (optional)"}, "cursor": str("resume cursor from a prior page (optional)")}), Annotations: readAnn},
-		{Name: "initiative_create", Description: "Create an initiative envelope (slug + title, optional description/owner/targetDate/successCriteria) through the one mutator surface. Agents may draft the envelope; the why (success criteria) stays human-edited. An initiative has no lifecycle — status derives from its member epics' logs.", InputSchema: obj(map[string]interface{}{"slug": str("initiative slug, lowercase kebab"), "title": str("initiative title"), "description": str("initiative description (optional)"), "owner": str("owner subject (optional)"), "targetDate": str("target date YYYY-MM-DD (optional)"), "successCriteria": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "success criteria bullets (optional)"}}, "slug", "title"), Annotations: writeAnn},
+		{Name: "space_create", Description: "Open a namespace (WK4): a prefix (auto-suggested from the title when omitted; never re-mintable once used — IS-C), a title, and optionally the advisory owner team (no policy reads it, WK-4). Creating a Space is the cheap gesture that precedes authoring epics into it; it sets no status and starts no work.", InputSchema: obj(map[string]interface{}{"title": str("Space title"), "prefix": str("typed-key prefix, 2–6 uppercase (optional; auto-suggested; WRK reserved)"), "description": str("the why — one honest paragraph (optional)"), "ownerTeamId": str("advisory owner team team_… (optional)")}, "title"), Annotations: writeAnn},
+		{Name: "space_update", Description: "Edit the namespace record (WK4): title, description, or the advisory owner team. The prefix and the ini_ machine rail never change (WK-3/IS-C) — identity is not editable.", InputSchema: obj(map[string]interface{}{"prefix": str("the Space's prefix (e.g. PAY)"), "title": str("new title (optional)"), "description": str("new description (optional)"), "ownerTeamId": str("advisory owner team team_… (optional; empty string clears)")}, "prefix"), Annotations: writeAnn},
+		{Name: "initiative_create", Description: "DEPRECATED alias (WK4) — prefer space_create: the initiative retired to a Space (a key namespace; status/health/dates live on epics). Still works and creates the same record; hides next release, never removed (WK-6).", InputSchema: obj(map[string]interface{}{"slug": str("initiative slug, lowercase kebab"), "title": str("initiative title"), "description": str("initiative description (optional)"), "owner": str("owner subject (optional)"), "targetDate": str("target date YYYY-MM-DD (optional)"), "successCriteria": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "success criteria bullets (optional)"}}, "slug", "title"), Annotations: writeAnn},
 		{Name: "milestone_upsert", Description: "Apply one ladder edit to an epic's milestones: op create/edit/reorder/remove on one milestone key. Authored intent only (title, goal, doneWhen, targetDate, ordinal) — per-milestone progress stays derived and cannot be entered. Editing an approved epic's ladder drifts the approval (ladderHash); a human re-approves.", InputSchema: obj(map[string]interface{}{"epic": str("epic slug"), "op": str("create | edit | reorder | remove"), "key": str("milestone key, e.g. M2"), "title": str("milestone title (create/edit)"), "goal": str("milestone goal (optional)"), "doneWhen": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "done-when criteria (optional)"}, "targetDate": str("target date YYYY-MM-DD (optional)"), "ordinal": map[string]interface{}{"type": "integer", "description": "ladder position (reorder)"}}, "epic", "op", "key"), Annotations: writeAnn},
 		// orun-initiatives-v2 (IS4) — the pen. Three reads and eleven
 		// writes; tier defaults per agent type live in agents/*.md (the
@@ -207,15 +228,18 @@ func Tools() []mcpserve.ToolDef {
 		{Name: "work_context", Description: "The any-key context bundle — the intended FIRST call of every session: give any key (task, milestone, epic, design, initiative; typed, letterless, alias, or machine id) and get the item's full view, its ancestry to the root with live states, the activity tail, and the open needs-you reasons in scope. Truncation is always echoed in budget[] with cursors — no silent caps.", InputSchema: obj(map[string]interface{}{"key": str("any item key or ref, e.g. PAY-T14, PAY-E2#M1, tsk_…, or a slug"), "depth": map[string]interface{}{"type": "integer", "description": "subtree depth below the item (default 2, max 4)"}, "perLevel": map[string]interface{}{"type": "integer", "description": "children per level (default 50, max 200)"}, "activity": map[string]interface{}{"type": "integer", "description": "activity tail length (default 20, max 100)"}}, "key"), Annotations: readAnn},
 		{Name: "work_now", Description: "The live board: every in-flight task × its latest worklog note × the seat working it, quiet chips derived at read. The \"what is every agent doing right now\" read; filter by initiative, epic, or seat; cursor-paged. Long-polls: pass the last response's seq as after (+ waitSeconds ≤25) to hold until something newer lands.", InputSchema: obj(map[string]interface{}{"initiative": str("filter to one initiative key (optional)"), "epic": str("filter to one epic key (optional)"), "seat": str("filter to one seat id, e.g. sp_… (optional)"), "limit": map[string]interface{}{"type": "integer", "description": "maximum rows (optional)"}, "cursor": str("resume cursor from a prior page (optional)"), "after": map[string]interface{}{"type": "integer", "description": "long-poll watermark: the last response's seq (optional)"}, "waitSeconds": map[string]interface{}{"type": "integer", "description": "long-poll window, ≤25 (optional)"}}), Annotations: readAnn},
 		{Name: "work_yours", Description: "The addressed personal queue (AttentionItem v1): everything that waits on YOU — drifted approvals you signed, reviews requested of you, idle milestones you own — one list, newest-decision-first, each item carrying the one gesture that clears it. The daily driver; there is no second inbox. Long-polls via after/waitSeconds.", InputSchema: obj(map[string]interface{}{"limit": map[string]interface{}{"type": "integer", "description": "maximum items (optional)"}, "cursor": str("resume cursor from a prior page (optional)"), "after": map[string]interface{}{"type": "integer", "description": "long-poll watermark: the last response's seq (optional)"}, "waitSeconds": map[string]interface{}{"type": "integer", "description": "long-poll window, ≤25 (optional)"}}), Annotations: readAnn},
-		{Name: "initiative_updates_get", Description: "One initiative's update feed, newest first: the attributed health headlines humans and owner-agents posted. Health is never a formula here — it is the latest update's word (staleness derives at read).", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
+		{Name: "epic_updates_get", Description: "One epic's update feed, newest first: the attributed health headlines humans and owner-agents posted (WK2 re-aims IS2 at the Epic). Health is never a formula here — it is the latest update's word (staleness derives at read).", InputSchema: obj(map[string]interface{}{"key": str("epic key")}, "key"), Annotations: readAnn},
+		{Name: "initiative_updates_get", Description: "DEPRECATED alias (WK4) — use epic_updates_get: health moved to the Epic (WK2). The retired-subject history keeps serving forever (reads never break, WK-6); hides next release.", InputSchema: obj(map[string]interface{}{"key": str("initiative key")}, "key"), Annotations: readAnn},
 		{Name: "item_assign", Description: "Assign a membership subject to ANY noun — a task (claims work), a design (names the author), an epic or initiative (names the owner). Absorbs task_assign, which stays registered. The dispatch gate is unchanged: sp_ into a non-approved epic still refuses unless a human supplies the attributed override note.", InputSchema: obj(map[string]interface{}{"key": str("item key (task, design, epic, initiative)"), "subject": str("membership subject id (usr_/sp_/team_)"), "unassign": map[string]interface{}{"type": "boolean", "description": "remove instead of add (optional)"}, "override": str("attributed override note for the dispatch gate (optional; human-supplied)"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "subject"), Annotations: writeAnn},
 		{Name: "review_request", Description: "Request review on an epic or a design: appends review_requested and surfaces the item in reviewers' queues. An agent asking for eyes is the lifecycle working as designed.", InputSchema: obj(map[string]interface{}{"key": str("epic slug or design key"), "note": str("what to look at (optional)"), "revision": str("doc revision sha256:<hex> under review (optional)"), "reviewers": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reviewer subjects (optional)"}}, "key"), Annotations: writeAnn},
 		{Name: "review_verdict", Description: "Submit a review verdict: approve | request_changes, with the reasoning note (mandatory — an opinion without a reason is a vote, not a review). A verdict is an OPINION; the decision (epic approval, design adoption) stays a separate, human-signed act.", InputSchema: obj(map[string]interface{}{"key": str("epic slug or design key"), "verdict": str("approve | request_changes"), "note": str("the reasoning (required)"), "revision": str("doc revision the verdict pins (optional)")}, "key", "verdict", "note"), Annotations: writeAnn},
 		{Name: "task_done", Description: "Assert a task is done, with the mandatory note saying why (the assertion lane, design §7.1). The WEAKEST voice: live delivery evidence at in_review or above wins over the assertion, released stays evidence-only, and the lifecycle names who asserted. Use when the work is finished but the world's evidence hasn't landed (or never will — research, ops, docs).", InputSchema: obj(map[string]interface{}{"key": str("task key"), "note": str("why the work is done (required)"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "note"), Annotations: writeAnn},
 		{Name: "task_note", Description: "Append a worklog note — the live \"now\" line on the task (≤280 chars; 1/min per task per seat, daily cap; beyond the clamp comes a typed rate_limited verdict). Narration is INERT: it moves no rung, feeds no health, triggers nothing (IS-8). Post one when starting, at meaningful turns, and when handing off.", InputSchema: obj(map[string]interface{}{"key": str("task key"), "text": str("the now line, e.g. \"tests green, writing the migration\""), "ref": str("evidence anchor: commit sha, file path, PR number (optional)"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "text"), Annotations: writeAnn},
-		{Name: "initiative_update_post", Description: "Post an attributed initiative update: a health word (on_track | at_risk | off_track) plus the narrative body. This is how health EXISTS — it is the latest update's headline, never a formula; the derived signals only suggest. Owner-agents post these on cadence.", InputSchema: obj(map[string]interface{}{"key": str("initiative key"), "health": str("on_track | at_risk | off_track"), "body": str("the update narrative"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "health", "body"), Annotations: writeAnn},
-		{Name: "initiative_status_set", Description: "Move an initiative through the stored five-state machine (planning → active ⇄ paused → completed; cancel/reopen/restore). start/pause/resume are agent-legal; complete/cancel/reopen/restore are SIGNATURES — human-only server-side (typed human_only verdict for agent seats), ask-tier in the agent policy so a human confirmation carries them. An illegal move answers 409 naming the allowed transitions.", InputSchema: obj(map[string]interface{}{"key": str("initiative key"), "to": str("planning | active | paused | completed | canceled"), "comment": str("why (optional; recorded on the transition)"), "force": map[string]interface{}{"type": "boolean", "description": "acknowledge open member tasks on complete (optional)"}, "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "to"), Annotations: writeAnn},
-		{Name: "design_adopt", Description: "Adopt a design: mints the proposed structure (epics → milestones → task skeletons) AND approves the minted epics at rev 0 in one transaction — one signature covers what it mints. Human-only server-side; ask-tier in every agent policy (the confirmation is the signature; an sp_ seat's ask auto-denies).", InputSchema: obj(map[string]interface{}{"key": str("design key"), "epics": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "subset of proposal epic slugs to mint (optional; default all)"}, "taskPrefix": str("task-key prefix for minted skeletons (optional)")}, "key"), Annotations: writeAnn},
+		{Name: "epic_update_post", Description: "Post an attributed epic update (WK2 re-aims IS2 at the Epic): a health word (on_track | at_risk | off_track) plus the narrative body. This is how health EXISTS — it is the latest update's headline, never a formula; the derived signals only suggest. Owner-agents post these on cadence.", InputSchema: obj(map[string]interface{}{"key": str("epic key"), "health": str("on_track | at_risk | off_track"), "body": str("the update narrative"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "health", "body"), Annotations: writeAnn},
+		{Name: "epic_status_set", Description: "Move an epic through the stored five-state machine (planning → active ⇄ paused → completed; cancel/reopen/restore) — the IS2 machine on its right subject (WK2). start/pause/resume are agent-legal; complete/cancel/reopen/restore are SIGNATURES — human-only server-side (typed human_only verdict for agent seats), ask-tier in the agent policy so a human confirmation carries them. An illegal move answers 409 naming the allowed transitions; paused/canceled closes the dispatch gate for member tasks (IS-M).", InputSchema: obj(map[string]interface{}{"key": str("epic key"), "to": str("planning | active | paused | completed | canceled"), "comment": str("why (optional; recorded on the transition)"), "force": map[string]interface{}{"type": "boolean", "description": "acknowledge open member tasks on complete (optional)"}, "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "to"), Annotations: writeAnn},
+		{Name: "initiative_update_post", Description: "DEPRECATED alias (WK4) — use epic_update_post: health moved to the Epic (WK2). This route answers the typed subject_retired verdict naming the epic route and this Space's candidate epics (R-2) — correct itself without a human. Hides next release, never removed (WK-6).", InputSchema: obj(map[string]interface{}{"key": str("initiative key"), "health": str("on_track | at_risk | off_track"), "body": str("the update narrative"), "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "health", "body"), Annotations: writeAnn},
+		{Name: "initiative_status_set", Description: "DEPRECATED alias (WK4) — use epic_status_set: status moved to the Epic (WK2). This route answers the typed subject_retired verdict naming the epic route and this Space's candidate epics (R-2) — correct itself without a human. Hides next release, never removed (WK-6).", InputSchema: obj(map[string]interface{}{"key": str("initiative key"), "to": str("planning | active | paused | completed | canceled"), "comment": str("why (optional; recorded on the transition)"), "force": map[string]interface{}{"type": "boolean", "description": "acknowledge open member tasks on complete (optional)"}, "clientToken": str("idempotency token (optional; defaulted on)")}, "key", "to"), Annotations: writeAnn},
+		{Name: "design_adopt", Description: "Adopt a design: mints its proposed milestone ladder + task skeletons INSIDE the design's own epic (WK3 §4.2 — adoption can no longer mint an epic; the retired epics[] selector answers a typed 422). Minting edits the approved ladder, so the epic's approval drifts (V4-3) — intended. Human-only server-side; ask-tier in every agent policy (the confirmation is the signature; an sp_ seat's ask auto-denies).", InputSchema: obj(map[string]interface{}{"key": str("design key"), "taskPrefix": str("task-key prefix for minted skeletons (optional; the epic's Space prefix wins)")}, "key"), Annotations: writeAnn},
 		{Name: "design_supersede", Description: "Supersede a design — retire it, optionally naming the design that replaces it. Human-only server-side; ask-tier in every agent policy.", InputSchema: obj(map[string]interface{}{"key": str("design key to supersede"), "by": str("the replacing design key (optional)"), "note": str("why (optional)")}, "key"), Annotations: writeAnn},
 		{Name: "epic_approve", Description: "Approve an epic at a revision — seals the EpicSnapshot brief (the frozen dispatch artifact) and opens the dispatch gate. Re-approval after drift pins the new revision. Human-only server-side; ask-tier in every agent policy (the confirmation is the signature).", InputSchema: obj(map[string]interface{}{"key": str("epic slug"), "revision": str("doc revision sha256:<hex> to approve"), "minApprovals": map[string]interface{}{"type": "integer", "description": "required approving verdicts (optional)"}}, "key", "revision"), Annotations: writeAnn},
 		{Name: "epic_revoke_approval", Description: "Revoke an epic's approval with the mandatory note saying why — closes the dispatch gate. Human-only server-side; ask-tier in every agent policy.", InputSchema: obj(map[string]interface{}{"key": str("epic slug"), "note": str("why the approval is withdrawn (required)")}, "key", "note"), Annotations: writeAnn},
@@ -465,21 +489,21 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 
 	case "design_propose":
 		var a struct {
-			Initiative string          `json:"initiative"`
-			Title      string          `json:"title"`
-			DocRef     string          `json:"docRef"`
-			Proposal   json.RawMessage `json:"proposal"`
+			Epic     string          `json:"epic"`
+			Title    string          `json:"title"`
+			DocRef   string          `json:"docRef"`
+			Proposal json.RawMessage `json:"proposal"`
 		}
-		if err := json.Unmarshal(args, &a); err != nil || a.Initiative == "" || a.Title == "" {
-			return nil, fmt.Errorf("design_propose: initiative and title are required")
+		if err := json.Unmarshal(args, &a); err != nil || a.Epic == "" || a.Title == "" {
+			return nil, fmt.Errorf("design_propose: epic and title are required")
 		}
-		out, err := s.API.CreateWorkDesign(ctx, a.Initiative, remotestate.CreateWorkDesignRequest{
+		out, err := s.API.CreateEpicDesign(ctx, a.Epic, remotestate.CreateWorkDesignRequest{
 			Title: a.Title, DocRef: a.DocRef, Proposal: a.Proposal,
 		})
 		if err != nil {
 			return nil, err
 		}
-		return toolText(fmt.Sprintf("proposed design %s (event seq %d) — a human reviews, compares, and adopts; adoption mints the epics", out.Key, out.Seq), false), nil
+		return toolText(fmt.Sprintf("proposed design %s in %s (event seq %d) — a human reviews, compares, and adopts; adoption mints the ladder inside the epic", out.Key, a.Epic, out.Seq), false), nil
 
 	case "task_regenerate":
 		var a struct {
@@ -506,6 +530,90 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 			return nil, err
 		}
 		return toolText(fmt.Sprintf("regenerated %s/%s: created %v, canceled %v, kept in-flight %v — proposed contracts are flagged for human review", a.Epic, a.Milestone, out.Created, out.Canceled, out.Kept), false), nil
+
+	case "spaces_list":
+		var a struct {
+			Archived bool `json:"archived"`
+		}
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, fmt.Errorf("spaces_list: invalid arguments")
+			}
+		}
+		spaces, err := s.API.ListSpaces(ctx, a.Archived)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(spaces)
+
+	case "space_get":
+		var a struct {
+			Prefix string `json:"prefix"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Prefix == "" {
+			return nil, fmt.Errorf("space_get: prefix is required")
+		}
+		space, err := s.API.GetSpace(ctx, a.Prefix)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(space)
+
+	case "work_epics":
+		var a struct {
+			Space    string `json:"space"`
+			State    string `json:"state"`
+			Health   string `json:"health"`
+			Archived bool   `json:"archived"`
+		}
+		if len(args) > 0 {
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, fmt.Errorf("work_epics: invalid arguments")
+			}
+		}
+		epics, err := s.API.ListEpics(ctx, remotestate.WorkEpicsOptions{
+			Space: a.Space, State: a.State, Health: a.Health, Archived: a.Archived,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(epics)
+
+	case "space_create":
+		var a struct {
+			Title       string `json:"title"`
+			Prefix      string `json:"prefix"`
+			Description string `json:"description"`
+			OwnerTeamID string `json:"ownerTeamId"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Title == "" {
+			return nil, fmt.Errorf("space_create: title is required")
+		}
+		out, err := s.API.CreateSpace(ctx, remotestate.CreateWorkSpaceRequest{
+			Title: a.Title, Prefix: a.Prefix, Description: a.Description, OwnerTeamID: a.OwnerTeamID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("created space %s — %s (event seq %d)", out.Space.Prefix, out.Space.Title, out.Seq), false), nil
+
+	case "space_update":
+		var a struct {
+			Prefix      string  `json:"prefix"`
+			Title       string  `json:"title"`
+			Description string  `json:"description"`
+			OwnerTeamID *string `json:"ownerTeamId"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Prefix == "" {
+			return nil, fmt.Errorf("space_update: prefix is required")
+		}
+		out, err := s.API.PatchSpace(ctx, a.Prefix, remotestate.PatchWorkSpaceRequest{
+			Title: a.Title, Description: a.Description, OwnerTeamID: a.OwnerTeamID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("updated space %s (event seq %d)", a.Prefix, out.Seq), false), nil
 
 	case "initiatives_list":
 		portfolio, err := s.API.ListInitiatives(ctx)
@@ -667,6 +775,19 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 		}
 		return toolJSON(queue)
 
+	case "epic_updates_get":
+		var a struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return nil, fmt.Errorf("epic_updates_get: key is required")
+		}
+		updates, err := s.API.ListEpicUpdates(ctx, a.Key)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(updates)
+
 	case "initiative_updates_get":
 		var a struct {
 			Key string `json:"key"`
@@ -772,6 +893,47 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 		}
 		return toolText(fmt.Sprintf("noted on %s (event seq %d) — narration is inert; it moves nothing", out.Key, out.Seq), false), nil
 
+	case "epic_update_post":
+		var a struct {
+			Key         string `json:"key"`
+			Health      string `json:"health"`
+			Body        string `json:"body"`
+			ClientToken string `json:"clientToken"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" || a.Health == "" || a.Body == "" {
+			return nil, fmt.Errorf("epic_update_post: key, health, and body are required")
+		}
+		out, err := s.API.PostEpicUpdate(ctx, a.Key, remotestate.PostInitiativeUpdateRequest{
+			Health: a.Health, Body: a.Body, ClientToken: a.ClientToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return toolText(fmt.Sprintf("update posted on %s (event seq %d) — health headline now %s", out.Key, out.Seq, out.Update.Health), false), nil
+
+	case "epic_status_set":
+		var a struct {
+			Key         string `json:"key"`
+			To          string `json:"to"`
+			Comment     string `json:"comment"`
+			Force       bool   `json:"force"`
+			ClientToken string `json:"clientToken"`
+		}
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" || a.To == "" {
+			return nil, fmt.Errorf("epic_status_set: key and to are required")
+		}
+		out, err := s.API.SetEpicStatus(ctx, a.Key, remotestate.SetInitiativeStatusRequest{
+			To: a.To, Comment: a.Comment, Force: a.Force, ClientToken: a.ClientToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		text := fmt.Sprintf("%s is now %s (event seq %d)", out.Key, out.Status, out.Seq)
+		if out.Warning != "" {
+			text += " — " + out.Warning
+		}
+		return toolText(text, false), nil
+
 	case "initiative_update_post":
 		var a struct {
 			Key         string `json:"key"`
@@ -782,6 +944,8 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" || a.Health == "" || a.Body == "" {
 			return nil, fmt.Errorf("initiative_update_post: key, health, and body are required")
 		}
+		// Deprecated alias (WK4): the retired route answers the typed
+		// subject_retired verdict naming epic_update_post's route (R-2).
 		out, err := s.API.PostInitiativeUpdate(ctx, a.Key, remotestate.PostInitiativeUpdateRequest{
 			Health: a.Health, Body: a.Body, ClientToken: a.ClientToken,
 		})
@@ -801,6 +965,8 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" || a.To == "" {
 			return nil, fmt.Errorf("initiative_status_set: key and to are required")
 		}
+		// Deprecated alias (WK4): the retired route answers the typed
+		// subject_retired verdict naming epic_status_set's route (R-2).
 		out, err := s.API.SetInitiativeStatus(ctx, a.Key, remotestate.SetInitiativeStatusRequest{
 			To: a.To, Comment: a.Comment, Force: a.Force, ClientToken: a.ClientToken,
 		})
@@ -815,20 +981,19 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (m
 
 	case "design_adopt":
 		var a struct {
-			Key        string   `json:"key"`
-			Epics      []string `json:"epics"`
-			TaskPrefix string   `json:"taskPrefix"`
+			Key        string `json:"key"`
+			TaskPrefix string `json:"taskPrefix"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
 			return nil, fmt.Errorf("design_adopt: key is required")
 		}
 		out, err := s.API.AdoptDesign(ctx, a.Key, remotestate.AdoptDesignRequest{
-			Epics: a.Epics, TaskPrefix: a.TaskPrefix,
+			TaskPrefix: a.TaskPrefix,
 		})
 		if err != nil {
 			return nil, err
 		}
-		return toolText(fmt.Sprintf("adopted %s (event seq %d): minted epics %v, task skeletons %v — the minted epics are approved at rev 0 under the same signature", a.Key, out.Seq, out.Minted, out.Tasks), false), nil
+		return toolText(fmt.Sprintf("adopted %s (event seq %d): minted milestones %v, task skeletons %v — inside the design's own epic; the approval drifts until re-approved (V4-3, intended)", a.Key, out.Seq, out.Minted, out.Tasks), false), nil
 
 	case "design_supersede":
 		var a struct {

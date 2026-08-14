@@ -58,3 +58,45 @@ func TestWorkImportHuman(t *testing.T) {
 		}
 	}
 }
+
+// WK4 (orun-work-spaces): `orun work` leads; `orun initiatives` is the
+// hidden deprecated alias serving the SAME roster — the exact inverse of
+// IN-F, and shared constructors mean the alias can never drift (WK-6).
+func TestWorkGroupLeadsAndInitiativesAliases(t *testing.T) {
+	root := &cobra.Command{Use: "orun"}
+	registerWorkCommand(root)
+	registerInitiativesAliasCommand(root)
+	var work, initiatives *cobra.Command
+	for _, c := range root.Commands() {
+		switch c.Name() {
+		case "work":
+			work = c
+		case "initiatives":
+			initiatives = c
+		}
+	}
+	if work == nil || work.Hidden {
+		t.Fatal("orun work must lead (registered and visible)")
+	}
+	if initiatives == nil || !initiatives.Hidden || initiatives.Deprecated == "" {
+		t.Fatal("orun initiatives must be the hidden deprecated alias")
+	}
+	names := func(c *cobra.Command) map[string]bool {
+		m := map[string]bool{}
+		for _, s := range c.Commands() {
+			m[s.Name()] = true
+		}
+		return m
+	}
+	w, i := names(work), names(initiatives)
+	for n := range w {
+		if !i[n] {
+			t.Errorf("alias is missing %q — it must forward the whole roster", n)
+		}
+	}
+	for _, n := range []string{"spaces", "epics", "start", "update", "adopt", "yours"} {
+		if !w[n] {
+			t.Errorf("work group is missing %q", n)
+		}
+	}
+}

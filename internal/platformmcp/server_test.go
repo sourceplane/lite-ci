@@ -541,8 +541,9 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 64 {
-		t.Fatalf("merged roster = %d tools, want 64 (37 work + 27 platform — IS6)", len(toolsResp.Result.Tools))
+	// 64 → 72 at WK4 (orun-work-spaces §2; see workmcp's roster pin).
+	if len(toolsResp.Result.Tools) != 72 {
+		t.Fatalf("merged roster = %d tools, want 72 (45 work + 27 platform — WK4)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -599,8 +600,10 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(toolsResp.Result.Tools) != 58 {
-		t.Fatalf("read-only roster = %d tools, want 58 (37 work + 21 platform reads — IS6)", len(toolsResp.Result.Tools))
+	// 58 → 66 at WK4 (the work MCP mounts whole; its own tier model
+	// governs writes — read-only strips platform writes only).
+	if len(toolsResp.Result.Tools) != 66 {
+		t.Fatalf("read-only roster = %d tools, want 66 (45 work + 21 platform reads — WK4)", len(toolsResp.Result.Tools))
 	}
 	workCount := 0
 	for _, tool := range toolsResp.Result.Tools {
@@ -610,15 +613,15 @@ func TestComposedServerReadOnly(t *testing.T) {
 			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") ||
 			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") ||
 			strings.HasPrefix(tool.Name, "item_") || strings.HasPrefix(tool.Name, "review_") ||
-			strings.HasPrefix(tool.Name, "pr_") {
+			strings.HasPrefix(tool.Name, "pr_") || strings.HasPrefix(tool.Name, "space") {
 			workCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 37 {
-		t.Errorf("work tools under --read-only = %d, want 37 (mutator-shaped, unaffected — IS6)", workCount)
+	if workCount != 45 {
+		t.Errorf("work tools under --read-only = %d, want 45 (mutator-shaped, unaffected — WK4 roster)", workCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -739,4 +742,35 @@ func (workFake) AdoptDesign(_ context.Context, key string, _ remotestate.AdoptDe
 }
 func (workFake) SupersedeDesign(_ context.Context, key string, _ remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error) {
 	return &remotestate.WorkMutationResponse{Key: key}, nil
+}
+
+// orun-work-spaces (WK1–WK4) — the Space names and the machine on the Epic.
+func (workFake) ListSpaces(context.Context, bool) (*remotestate.WorkSpaces, error) {
+	return &remotestate.WorkSpaces{}, nil
+}
+func (workFake) GetSpace(_ context.Context, prefix string) (*remotestate.WorkSpaceDetail, error) {
+	return &remotestate.WorkSpaceDetail{Space: remotestate.WorkSpaceView{Prefix: prefix}}, nil
+}
+func (workFake) CreateSpace(_ context.Context, req remotestate.CreateWorkSpaceRequest) (*remotestate.CreateWorkSpaceResponse, error) {
+	return &remotestate.CreateWorkSpaceResponse{Space: remotestate.WorkSpaceView{Prefix: req.Prefix, Title: req.Title}}, nil
+}
+func (workFake) PatchSpace(_ context.Context, prefix string, _ remotestate.PatchWorkSpaceRequest) (*remotestate.PatchSpaceResponse, error) {
+	return &remotestate.PatchSpaceResponse{Key: prefix, Space: remotestate.WorkSpaceView{Prefix: prefix}}, nil
+}
+func (workFake) ListEpics(context.Context, remotestate.WorkEpicsOptions) (*remotestate.WorkEpics, error) {
+	return &remotestate.WorkEpics{}, nil
+}
+func (workFake) SetEpicStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
+	return &remotestate.SetInitiativeStatusResponse{Key: key, Status: req.To}, nil
+}
+func (workFake) PostEpicUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostEpicUpdateResponse, error) {
+	return &remotestate.PostEpicUpdateResponse{Key: key, Update: remotestate.WorkEpicUpdateView{Epic: key, Health: req.Health}}, nil
+}
+func (workFake) ListEpicUpdates(_ context.Context, key string) (*remotestate.WorkEpicUpdates, error) {
+	_ = key
+	return &remotestate.WorkEpicUpdates{}, nil
+}
+func (workFake) CreateEpicDesign(_ context.Context, epicKey string, _ remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
+	_ = epicKey
+	return &remotestate.WorkMutationResponse{Key: "PAY-D1"}, nil
 }

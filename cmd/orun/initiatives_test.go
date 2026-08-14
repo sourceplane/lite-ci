@@ -15,7 +15,7 @@ import (
 func runInitiativesCmd(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	root := &cobra.Command{Use: "orun", SilenceUsage: true, SilenceErrors: true}
-	registerInitiativesCommand(root)
+	registerInitiativesAliasCommand(root)
 	buf := &bytes.Buffer{}
 	root.SetOut(buf)
 	root.SetErr(buf)

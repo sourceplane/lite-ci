@@ -29,9 +29,10 @@ func TestShippedTierMatrices(t *testing.T) {
 	// tools (Read, Bash, …) are capitalized and catalog_*/connection_info
 	// live with other providers.
 	workPrefixes := []string{"work_", "task_", "spec_", "epic_", "milestone_",
-		"design_", "initiative", "item_", "activity_", "contract_", "review_", "pr_"}
+		"design_", "initiative", "item_", "activity_", "contract_", "review_", "pr_",
+		"space"} // WK4: spaces_list / space_get / space_create / space_update
 
-	for _, typeName := range []string{"implementer", "orchestrator", "bootstrapper", "initiative-owner"} {
+	for _, typeName := range []string{"implementer", "orchestrator", "bootstrapper", "epic-owner"} {
 		d, issues := LoadNamed(typeName)
 		if d == nil {
 			t.Fatalf("%s: %v", typeName, issues)
@@ -62,22 +63,26 @@ func TestShippedTierMatrices(t *testing.T) {
 		}
 	}
 
-	// The initiative-owner runs the FULL loop: primes from any key,
-	// narrates, asserts, posts the headline, moves non-terminal state on
-	// the allow lane — and may ASK for every signature.
-	d, issues := LoadNamed("initiative-owner")
+	// The epic-owner (WK4 renamed from initiative-owner; matrix unchanged)
+	// runs the FULL loop: primes from any key, narrates, asserts, posts
+	// the headline, moves non-terminal state on the allow lane — and may
+	// ASK for every signature. The IS-era alias tools stay allowed: their
+	// retired routes answer the typed subject_retired redirect (R-2).
+	d, issues := LoadNamed("epic-owner")
 	if d == nil {
-		t.Fatalf("initiative-owner: %v", issues)
+		t.Fatalf("epic-owner: %v", issues)
 	}
 	allow := map[string]bool{}
 	for _, n := range d.Tools.Allow {
 		allow[n] = true
 	}
 	for _, n := range []string{"work_context", "work_now", "work_yours", "task_note", "task_done",
+		"epic_update_post", "epic_status_set", "space_create", "space_update",
+		"spaces_list", "space_get", "work_epics", "epic_updates_get",
 		"initiative_update_post", "initiative_status_set", "initiative_create",
 		"design_propose", "review_request", "review_verdict", "item_assign"} {
 		if !allow[n] {
-			t.Errorf("initiative-owner: %s must be allow — the loop runs on it", n)
+			t.Errorf("epic-owner: %s must be allow — the loop runs on it", n)
 		}
 	}
 	ask := map[string]bool{}
@@ -86,7 +91,7 @@ func TestShippedTierMatrices(t *testing.T) {
 	}
 	for _, sig := range signatures {
 		if !ask[sig] {
-			t.Errorf("initiative-owner: %s must ride the ask lane — the confirmation is the signature", sig)
+			t.Errorf("epic-owner: %s must ride the ask lane — the confirmation is the signature", sig)
 		}
 	}
 }

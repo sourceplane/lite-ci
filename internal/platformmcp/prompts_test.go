@@ -111,8 +111,10 @@ func TestPromptToolDriftGuard(t *testing.T) {
 	for _, tool := range (&mcpserve.ConnectionInfoProvider{}).Tools() {
 		roster[tool.Name] = true
 	}
-	if len(roster) != 65 {
-		t.Fatalf("composed roster = %d tools, want 65 (37 work + 27 platform + 1 built-in)", len(roster))
+	// 65 → 73 at WK4 (orun-work-spaces §2): the Space/epic names beside
+	// five IS-era aliases, visible one release then hidden-but-live (WK-6).
+	if len(roster) != 73 {
+		t.Fatalf("composed roster = %d tools, want 73 (45 work + 27 platform + 1 built-in — WK4)", len(roster))
 	}
 
 	tokenPattern := regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)

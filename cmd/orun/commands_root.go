@@ -287,7 +287,7 @@ func init() {
 	registerSecretsCommand(rootCmd)
 	registerIntegrationsCommand(rootCmd)
 	registerPolicyCommand(rootCmd)
-	registerInitiativesCommand(rootCmd)
+	registerInitiativesAliasCommand(rootCmd)
 	registerSkillsCommand(rootCmd)
 	registerPrCommand(rootCmd)
 	registerWorkCommand(rootCmd)

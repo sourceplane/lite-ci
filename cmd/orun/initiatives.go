@@ -12,50 +12,20 @@ import (
 	"github.com/sourceplane/orun/internal/worklens"
 )
 
-// orun initiatives (orun-initiatives IN6) — the work plane's CLI group,
-// replacing `orun work` (which survives one release as a hidden deprecated
-// alias forwarding to the same run functions; see work.go). Lifecycle stays
-// a derived query over the two logs: nothing in this group can set a status.
+// orun work (orun-work-spaces WK4) — the work plane's CLI group, leading
+// again: the exact inverse of IN-F. `orun initiatives` survives as a
+// hidden deprecated alias forwarding to the same run functions (see
+// work.go) — one release visible in history, never removed (WK-6).
+// Lifecycle stays a derived query over the two logs: nothing in this
+// group can set a task's rung.
 
-func registerInitiativesCommand(root *cobra.Command) {
-	cmd := &cobra.Command{
-		Use:   "initiatives",
-		Short: "The work plane: portfolio, trees, tasks, activity, designs",
-		Long: `The work plane (specs/orun-initiatives; substrate specs/orun-work).
-
-Work lifecycle is a derived query over two append-only logs, never a stored
-status. This group is the terminal face of the Initiatives surface: the
-portfolio, one initiative's tree, task detail with evidence, the tagged
-activity tail, and the design/import/doc plumbing.
-
-Subcommands:
-  list      Portfolio: key, title, status, progress, needs-you, target
-  view      One initiative's tree as an indented ladder
-  create    Create an initiative envelope (--title, --why …)
-  edit      Edit an item's envelope (title/description/owner/target/…)
-  cancel    Retire an item (task or epic) — the append-only "delete"
-  import    Map a specs/ tree to the hierarchy and apply to Orun Cloud
-  task      Task detail (view), creation (create), voice (done, note)
-  activity  The tagged activity tail for any noun
-  doc       Pull an epic spec / design doc as markdown
-  design    List or propose design runs on an initiative
-
-State and the loop (orun-initiatives-v2 — initiative status is a stored
-speech act now; task rungs stay derived):
-  start | pause | resume | complete | reopen   The five-state machine
-  update / updates    Post / read the attributed health headlines
-  context   The any-key context bundle (item, ancestry, activity, needs-you)
-  assign    Assign a subject to any noun (task, design, epic, initiative)
-  review    request | verdict — eyes and opinions on epics and designs
-  adopt     Adopt a design (interactive confirm = the signature)
-  now       The live board: in-flight tasks × latest worklog note × seat
-  yours     Your addressed queue: everything that waits on you, one list
-
-Run 'orun initiatives <subcommand> --help' for details.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
+// addWorkSubcommands attaches the full roster to a group command — the
+// single source both the visible `work` group and the hidden
+// `initiatives` alias draw from, so nothing is duplicated and the alias
+// can never drift.
+func addWorkSubcommands(cmd *cobra.Command) {
+	cmd.AddCommand(newWorkSpacesCommand())
+	cmd.AddCommand(newWorkEpicsCommand())
 	cmd.AddCommand(newInitiativesListCommand())
 	cmd.AddCommand(newInitiativesViewCommand())
 	cmd.AddCommand(newInitiativesCreateCommand())
@@ -66,8 +36,9 @@ Run 'orun initiatives <subcommand> --help' for details.`,
 	cmd.AddCommand(newInitiativesActivityCommand())
 	cmd.AddCommand(newInitiativesDocCommand())
 	cmd.AddCommand(newInitiativesDesignCommand())
-	// orun-initiatives-v2 (IS4) — the state machine, the update cadence,
-	// the context bundle, the generalized assign, review/adopt, the board.
+	// orun-initiatives-v2 (IS4) — the state machine (on the Epic since
+	// WK2), the update cadence, the context bundle, the generalized
+	// assign, review/adopt, the board.
 	for _, sub := range newInitiativeStatusCommands() {
 		cmd.AddCommand(sub)
 	}
@@ -79,6 +50,49 @@ Run 'orun initiatives <subcommand> --help' for details.`,
 	cmd.AddCommand(newInitiativesAdoptCommand())
 	cmd.AddCommand(newInitiativesNowCommand())
 	cmd.AddCommand(newInitiativesYoursCommand())
+}
+
+func registerWorkCommand(root *cobra.Command) {
+	cmd := &cobra.Command{
+		Use:   "work",
+		Short: "The work plane: Spaces, epics, tasks, activity, designs",
+		Long: `The work plane (specs/epics/orun-work-spaces; substrate specs/orun-work).
+
+Work lifecycle is a derived query over two append-only logs, never a stored
+status. The initiative retired to a SPACE — a key namespace (prefix, title,
+advisory owner team); status, health, updates and dates live on the EPIC,
+which lines the hierarchy up one-to-one with your PM tool's.
+
+Subcommands:
+  spaces    The namespaces: list | show | create | update
+  epics     The Work home read: epic rows with their three truth sources
+  list      Legacy portfolio read (initiatives view; reads never break)
+  view      One initiative's tree as an indented ladder (legacy read)
+  create    Create a Space the legacy way (--title, --why …)
+  edit      Edit an item's envelope (title/description/owner/target/…)
+  cancel    Retire an item (task or epic) — the append-only "delete"
+  import    Map a specs/ tree to the hierarchy and apply to Orun Cloud
+  task      Task detail (view), creation (create), voice (done, note)
+  activity  The tagged activity tail for any noun
+  doc       Pull an epic spec / design doc as markdown
+  design    List design runs; propose one INSIDE an epic (WK3)
+
+State and the loop (the machine moved to the Epic at WK2):
+  start | pause | resume | complete | reopen   The five-state machine
+  update / updates    Post / read the attributed health headlines
+  context   The any-key context bundle (item, ancestry, activity, needs-you)
+  assign    Assign a subject to any noun (task, design, epic, Space owner)
+  review    request | verdict — eyes and opinions on epics and designs
+  adopt     Adopt a design (interactive confirm = the signature)
+  now       The live board: in-flight tasks × latest worklog note × seat
+  yours     Your addressed queue: everything that waits on you, one list
+
+Run 'orun work <subcommand> --help' for details.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	addWorkSubcommands(cmd)
 	root.AddCommand(cmd)
 }
 
@@ -1065,21 +1079,23 @@ func newInitiativesDesignProposeCommand() *cobra.Command {
 		proposal   string
 	)
 	cmd := &cobra.Command{
-		Use:   "propose <initiative>",
-		Short: "Start a Draft design run under an initiative",
-		Long: `Create a Draft design under an initiative: a document reference plus an
-optional structured proposal (epics → milestones → task skeletons). A design
-is a PROPOSAL — humans review, compare, and adopt; adoption mints the epics
-and stays human-only.`,
+		Use:   "propose <epic>",
+		Short: "Start a Draft design run inside an epic (WK3)",
+		Long: `Create a Draft design INSIDE an epic: a document reference plus an
+optional structured proposal — the milestone ladder + task skeletons for
+the epic's fixed scope. A design is a PROPOSAL — humans review, compare,
+and adopt; adoption mints the ladder inside the design's own epic and
+stays human-only. The pre-WK3 epics[] mint-tree shape is retired:
+readable history, never adoptable.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
-				return fmt.Errorf("orun initiatives design propose: --title is required")
+				return fmt.Errorf("orun work design propose: --title is required")
 			}
 			req := remotestate.CreateWorkDesignRequest{Title: title, DocRef: docRef}
 			if proposal != "" {
 				if !json.Valid([]byte(proposal)) {
-					return fmt.Errorf("orun initiatives design propose: --proposal is not valid JSON")
+					return fmt.Errorf("orun work design propose: --proposal is not valid JSON")
 				}
 				req.Proposal = json.RawMessage(proposal)
 			}
@@ -1087,20 +1103,20 @@ and stays human-only.`,
 			if err != nil {
 				return err
 			}
-			resp, err := client.CreateWorkDesign(cmd.Context(), args[0], req)
+			resp, err := client.CreateEpicDesign(cmd.Context(), args[0], req)
 			if err != nil {
-				return fmt.Errorf("orun initiatives design propose: %w", err)
+				return fmt.Errorf("orun work design propose: %w", err)
 			}
 			if asJSON {
 				return encodeJSON(cmd, resp)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "proposed design %s (seq %d) — a human reviews, compares, and adopts\n", resp.Key, resp.Seq)
+			fmt.Fprintf(cmd.OutOrStdout(), "proposed design %s in %s (seq %d) — a human reviews, compares, and adopts\n", resp.Key, args[0], resp.Seq)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "design title (required)")
 	cmd.Flags().StringVar(&docRef, "doc-ref", "", "design doc revision sha256:<hex>")
-	cmd.Flags().StringVar(&proposal, "proposal", "", "structured proposal JSON ({\"epics\":[…]})")
+	cmd.Flags().StringVar(&proposal, "proposal", "", "structured proposal JSON ({\"milestones\":[…],\"taskSkeletons\":[…]})")
 	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }

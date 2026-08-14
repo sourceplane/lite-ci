@@ -9,13 +9,16 @@ import (
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
-// orun initiatives — the orun-initiatives-v2 (IS4) verbs: the stored state
-// machine (start/pause/resume/complete/reopen), the update cadence
+// orun work — the orun-initiatives-v2 (IS4) verbs, re-aimed at the Epic
+// at WK4 (orun-work-spaces §2: the machine moved to its right subject at
+// WK2; the CLI followed after the model work, so no reader meets a renamed
+// verb that still behaves the old way): the stored state machine
+// (start/pause/resume/complete/reopen), the update cadence
 // (update/updates), the any-key context bundle, the generalized assign,
 // review request/verdict, adoption (interactive confirm = the signature),
 // the agent's voice (task done / task note), and the live board (now).
-// Initiative status is a stored SPEECH ACT now; task rungs stay derived —
-// nothing here can move one.
+// Epic status is a stored SPEECH ACT; task rungs stay derived — nothing
+// here can move one.
 
 // statusVerbs maps each CLI verb to its target state. resume and reopen
 // both aim at active — the server judges legality from the current state
@@ -27,16 +30,16 @@ var statusVerbs = []struct {
 	long   string
 	forced bool // registers --force (complete only: acknowledge open tasks)
 }{
-	{"start", "active", "Start an initiative: planning → active",
-		"Move an initiative into active. Legal from planning (and from paused via resume\n— same target state, the machine knows the difference).", false},
-	{"pause", "paused", "Pause an initiative: active → paused (closes the dispatch gate)",
-		"Pause an initiative. Agents stop being dispatched into its epics until resume;\nin-flight tasks finish.", false},
-	{"resume", "active", "Resume a paused initiative: paused → active",
-		"Resume a paused initiative — reopens the dispatch gate.", false},
-	{"complete", "completed", "Complete an initiative (terminal; a human signature)",
-		"Complete an initiative. A terminal move — human-only on the wire (agent seats\nget the typed human_only refusal). Open member tasks produce a warning, never a\nblock; pass --force to acknowledge them silently.", true},
-	{"reopen", "active", "Reopen a completed initiative: completed → active",
-		"Reopen a completed initiative — a human signature, like every terminal move.", false},
+	{"start", "active", "Start an epic: planning → active",
+		"Move an epic into active. Legal from planning (and from paused via resume\n— same target state, the machine knows the difference).", false},
+	{"pause", "paused", "Pause an epic: active → paused (closes the dispatch gate)",
+		"Pause an epic. Agents stop being dispatched into its tasks until resume;\nin-flight tasks finish.", false},
+	{"resume", "active", "Resume a paused epic: paused → active",
+		"Resume a paused epic — reopens the dispatch gate.", false},
+	{"complete", "completed", "Complete an epic (terminal; a human signature)",
+		"Complete an epic. A terminal move — human-only on the wire (agent seats\nget the typed human_only refusal). Open member tasks produce a warning, never a\nblock; pass --force to acknowledge them silently.", true},
+	{"reopen", "active", "Reopen a completed epic: completed → active",
+		"Reopen a completed epic — a human signature, like every terminal move.", false},
 }
 
 func newInitiativeStatusCommands() []*cobra.Command {
@@ -51,7 +54,7 @@ func newInitiativeStatusCommands() []*cobra.Command {
 			force      bool
 		)
 		cmd := &cobra.Command{
-			Use:   verb.use + " <key>",
+			Use:   verb.use + " <epic-key>",
 			Short: verb.short,
 			Long:  verb.long,
 			Args:  cobra.ExactArgs(1),
@@ -60,11 +63,11 @@ func newInitiativeStatusCommands() []*cobra.Command {
 				if err != nil {
 					return err
 				}
-				resp, err := client.SetInitiativeStatus(cmd.Context(), args[0], remotestate.SetInitiativeStatusRequest{
+				resp, err := client.SetEpicStatus(cmd.Context(), args[0], remotestate.SetInitiativeStatusRequest{
 					To: verb.to, Comment: comment, Force: force,
 				})
 				if err != nil {
-					return fmt.Errorf("orun initiatives %s: %w", verb.use, err)
+					return fmt.Errorf("orun work %s: %w", verb.use, err)
 				}
 				if asJSON {
 					return encodeJSON(cmd, resp)
@@ -112,29 +115,29 @@ func newInitiativesUpdateCommand() *cobra.Command {
 		message    string
 	)
 	cmd := &cobra.Command{
-		Use:   "update <key>",
+		Use:   "update <epic-key>",
 		Short: "Post an attributed health update (the headline, not a formula)",
-		Long: `Post an initiative update: a health word you are prepared to defend plus the
+		Long: `Post an epic update: a health word you are prepared to defend plus the
 narrative. Health is the latest update's headline — never computed, never set
 directly; the derived signals only suggest. Staleness derives at read.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			word, err := healthWordOf(health)
 			if err != nil {
-				return fmt.Errorf("orun initiatives update: %w", err)
+				return fmt.Errorf("orun work update: %w", err)
 			}
 			if strings.TrimSpace(message) == "" {
-				return fmt.Errorf("orun initiatives update: -m is required — an update without a narrative is a mood, not an update")
+				return fmt.Errorf("orun work update: -m is required — an update without a narrative is a mood, not an update")
 			}
 			client, err := workClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
-			resp, err := client.PostInitiativeUpdate(cmd.Context(), args[0], remotestate.PostInitiativeUpdateRequest{
+			resp, err := client.PostEpicUpdate(cmd.Context(), args[0], remotestate.PostInitiativeUpdateRequest{
 				Health: word, Body: message,
 			})
 			if err != nil {
-				return fmt.Errorf("orun initiatives update: %w", err)
+				return fmt.Errorf("orun work update: %w", err)
 			}
 			if asJSON {
 				return encodeJSON(cmd, resp)
@@ -156,7 +159,7 @@ func newInitiativesUpdatesCommand() *cobra.Command {
 		asJSON     bool
 	)
 	cmd := &cobra.Command{
-		Use:   "updates <key>",
+		Use:   "updates <epic-key>",
 		Short: "The update feed, newest first: attributed health headlines",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -164,9 +167,9 @@ func newInitiativesUpdatesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			feed, err := client.ListInitiativeUpdates(cmd.Context(), args[0])
+			feed, err := client.ListEpicUpdates(cmd.Context(), args[0])
 			if err != nil {
-				return fmt.Errorf("orun initiatives updates: %w", err)
+				return fmt.Errorf("orun work updates: %w", err)
 			}
 			if asJSON {
 				return encodeJSON(cmd, feed)
@@ -434,26 +437,26 @@ func newInitiativesAdoptCommand() *cobra.Command {
 		asJSON     bool
 		yes        bool
 		taskPrefix string
-		epics      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "adopt <design-key>",
-		Short: "Adopt a design: mint its structure and approve the minted epics (a signature)",
-		Long: `Adopt a design: mints the proposed epics → milestones → task skeletons AND
-approves the minted epics at rev 0, one transaction — one signature covers
-what it mints. The confirmation IS the signature: interactive runs confirm,
-non-interactive runs require --yes. Human-only server-side.`,
+		Short: "Adopt a design: mint its ladder inside its own epic (a signature)",
+		Long: `Adopt a design: mints the proposed milestone ladder + task skeletons INSIDE
+the design's own epic (WK3 — adoption can no longer mint an epic). Minting
+edits the approved ladder, so the epic's approval drifts until re-approved
+(V4-3) — intended. The confirmation IS the signature: interactive runs
+confirm, non-interactive runs require --yes. Human-only server-side.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			if !yes {
 				if !termIsInteractive() {
-					return fmt.Errorf("orun initiatives adopt: confirmation required (pass --yes) — adoption mints structure and approves it")
+					return fmt.Errorf("orun work adopt: confirmation required (pass --yes) — adoption mints the ladder inside the epic")
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Adopt %s? This mints the proposed structure and approves the minted epics at rev 0. [y/N] ", key)
+				fmt.Fprintf(cmd.OutOrStdout(), "Adopt %s? This mints the proposed ladder inside its epic and drifts the epic's approval until re-approved. [y/N] ", key)
 				var answer string
 				if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err != nil || (answer != "y" && answer != "Y" && answer != "yes") {
-					return fmt.Errorf("orun initiatives adopt: not confirmed")
+					return fmt.Errorf("orun work adopt: not confirmed")
 				}
 			}
 			client, err := workClient(cmd.Context(), backendURL, workspace)
@@ -461,22 +464,21 @@ non-interactive runs require --yes. Human-only server-side.`,
 				return err
 			}
 			resp, err := client.AdoptDesign(cmd.Context(), key, remotestate.AdoptDesignRequest{
-				Epics: epics, TaskPrefix: taskPrefix,
+				TaskPrefix: taskPrefix,
 			})
 			if err != nil {
-				return fmt.Errorf("orun initiatives adopt: %w", err)
+				return fmt.Errorf("orun work adopt: %w", err)
 			}
 			if asJSON {
 				return encodeJSON(cmd, resp)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "adopted %s (seq %d)\nminted epics: %s\ntask skeletons: %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "adopted %s (seq %d)\nminted milestones: %s\ntask skeletons: %s\n",
 				key, resp.Seq, strings.Join(resp.Minted, ", "), strings.Join(resp.Tasks, ", "))
 			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt (non-interactive signature)")
-	cmd.Flags().StringVar(&taskPrefix, "task-prefix", "", "task-key prefix for minted skeletons")
-	cmd.Flags().StringArrayVar(&epics, "epic", nil, "proposal epic slug to mint (repeatable; default all)")
+	cmd.Flags().StringVar(&taskPrefix, "task-prefix", "", "task-key prefix for minted skeletons (the epic's Space prefix wins)")
 	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
