@@ -4,7 +4,7 @@ title: orun workspace
 
 `orun workspace` is how you say **which workspace you are working in** — once,
 instead of on every command. Every Orun Cloud command (`orun secrets`,
-`orun integrations`, `orun policy`, `orun work`, `orun run --remote-state`)
+`orun integrations`, `orun policy`, `orun skills`, `orun run --remote-state`)
 runs against exactly one workspace; this is where that choice lives.
 
 ```bash

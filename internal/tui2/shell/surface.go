@@ -11,7 +11,7 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/frame"
 )
 
-// Surface is one of the cockpit's top-level screens (Home, Work, Agents, …).
+// Surface is one of the cockpit's top-level screens (Home, Agents, …).
 // Surfaces are registered as pointers and mutate themselves — the v1 pattern
 // of copying child models by value is gone.
 type Surface interface {
