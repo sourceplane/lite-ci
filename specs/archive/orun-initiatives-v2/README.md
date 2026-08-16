@@ -1,4 +1,12 @@
-# Spec: orun-initiatives-v2 (initiative-grade state — orun half)
+# Spec: orun-initiatives-v2 (initiative-grade state — orun half; ARCHIVED)
+
+> **Retired** with the whole work programme by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 removed the orun half). The provenance pen it introduced — `orun pr`,
+> `internal/provenance`, the `Orun-Task` trailer and the cloud's
+> `orun/compliance` check — is the one part that survived the teardown, and
+> is now standalone. Frozen historical snapshot otherwise.
+
 
 **The plane gains a spine and the agent gains a pen. Initiative status
 and health become stored speech acts (the delivery fold stays

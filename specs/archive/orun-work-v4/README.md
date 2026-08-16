@@ -1,4 +1,10 @@
-# Spec: orun-work-v4 (the planning hierarchy — orun half)
+# Spec: orun-work-v4 (the planning hierarchy — orun half; ARCHIVED)
+
+> **Retired** with the whole work programme by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 removed the orun half). Frozen historical snapshot; the durable
+> behaviour catalogue is that epic's `carries-forward.md`.
+
 
 **Work gains a shape: Initiative → Design → Epic → Milestone → Task. v2
 (`specs/orun-work/`) made delivery lifecycle a derived query nobody can lie

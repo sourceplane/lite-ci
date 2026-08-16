@@ -7,24 +7,24 @@ title: orun mcp
 dependency-free JSON-RPC 2.0 server over stdio that gives an agent hands on
 everything orun through a single connection.
 
-One loop composes two tool planes — **46 tools under one initialize**:
+One loop composes two tool planes — **28 tools under one initialize**, plus
+the built-in `connection_info`:
 
-- **The work plane** (21 tools) — orun's delivery-derived work tracker and
-  its planning hierarchy: the initiatives portfolio and tree, tasks with
-  *derived* lifecycle and evidence, sealed spec and epic briefs,
-  initiative/design/milestone reads, mutator-only writes. Mounted when a
-  workspace scope resolves.
-- **The platform plane** (25 tools) — the Orun Cloud public API: catalog,
+- **The pen plane** (1 tool) — `pr_open` writes a PR's lineage: the branch
+  renamed onto the grammar, pushed, and the machine-readable manifest in the
+  body. Mounted whenever the server runs inside a repository checkout — it
+  needs git, not a credential.
+- **The platform plane** (27 tools) — the Orun Cloud public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
-  metadata, webhooks. 19 reads plus 6 policy-gated writes. Mounted whenever
-  cloud auth resolves.
+  metadata, webhooks, skills. 21 reads plus 6 policy-gated writes. Mounted
+  whenever cloud auth resolves.
 
 ```bash
 orun mcp serve
 ```
 
-"Who owns billing-worker?", "why did the last prod run fail?", and "what's
-in flight on the work plane?" — one server answers all three.
+"Who owns billing-worker?", "why did the last prod run fail?", and "open the
+PR for what I just built" — one server answers all three.
 
 ## Setup
 
@@ -74,9 +74,9 @@ Mounting is contextual, never guessed:
 
 - **Platform tools mount whenever auth resolves.** They take an explicit
   `workspace` argument, so one server reaches every workspace you belong to.
-- **Work tools mount when a workspace scope resolves** (the `--workspace`
-  flag, the linked repo, or intent config). Without one, the server starts
-  platform-only and says so on stderr.
+- **The pen mounts on the checkout.** Run the server from inside the repo
+  and `pr_open` is there, with or without cloud auth. Outside one it skips
+  and `connection_info` says why.
 - **Workspace defaulting.** When serve resolves an ambient workspace, it
   fills an absent `workspace` argument on platform tools and the advertised
   schemas mark it optional. An explicit argument always wins.
@@ -89,15 +89,14 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 
 | Flag | Effect |
 | --- | --- |
-| `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Mounts the work plane and becomes the platform tools' default `workspace`. |
+| `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Becomes the platform tools' default `workspace`. |
 | `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted). |
-| `--read-only` | Drop the 6 platform write tools from the roster (40 tools instead of 46). Filtered from `tools/list` *and* blocked at execution. |
+| `--read-only` | Drop the 6 platform write tools from the roster (22 tools instead of 28). Filtered from `tools/list` *and* blocked at execution. |
 
-`--read-only` deliberately does **not** touch the work plane's write tools:
-they are mutator-shaped by design (one audited mutator surface for UI, MCP,
-and CLI — the work spec's WP-6 decision), and the work plane's safety model
-is sealed briefs plus mutator-only writes, not a read-only mode. The flag is
-a platform-plane switch.
+`--read-only` deliberately does **not** touch `pr_open`. The flag scopes what
+the server may change *in the cloud*; the pen changes your checkout and your
+GitHub, which is the whole reason it is mounted, and silently stripping it
+would leave an agent with no way to deliver its work.
 
 ## `orun mcp tools`
 
@@ -109,68 +108,27 @@ orun mcp tools --json        # the same rows as JSON
 orun mcp tools --read-only   # the roster as `serve --read-only` advertises it
 ```
 
-## The work plane (21 tools)
+## The pen plane (1 tool)
 
 | Tool | Kind | Purpose |
 | --- | --- | --- |
-| `initiatives_list` | read | The portfolio: every initiative with derived status, progress, needs-you reasons, agent assignees, epic and design rows |
-| `initiative_tree` | read | One initiative's full hierarchy: epics with intent, milestones with derived state, tasks with rungs and evidence, docs, designs |
-| `task_get` | read | One task's whole page: rung with evidence, ancestry, delivery evidence, components affected, activity tail |
-| `activity_get` | read | The tagged activity tail for any noun — both logs folded, ancestry-scoped, cursor-paged |
-| `work_query` | read | The fold summary — every task's derived rung WITH its evidence |
-| `work_get` | read | One task in full (contract, lifecycle, evidence, pins) |
-| `work_timeline` | read | One item's unified timeline: coordination and observation logs interleaved by time, evidence attached |
-| `spec_get` | read | A sealed, content-addressed SpecSnapshot (intent only — fold output is asserted absent from the sealed bytes) |
-| `spec_doc` | read | A spec's cloud document revision (content-addressed; latest when `rev` is omitted) |
-| `epic_brief` | read | The frozen brief a **human approval sealed**: EpicSnapshot canonical bytes + content id — doc ref, milestone ladder + hash, task contracts, approval record. An unapproved epic has no brief |
-| `initiative_get` | read | One initiative's derived rollup: health with named evidence, progress, per-epic intent + execution |
-| `design_get` | read | One design: doc pointer, sealed context, structured proposal, folded intent state |
-| `milestone_get` | read | One epic's milestone ladder: authored goals/done-when plus derived progress |
-| `task_create` | write | Create a task through the cloud mutator (optionally inside a milestone) |
-| `task_comment` | write | Append a coordination comment |
-| `task_assign` | write | Assign/unassign through the mutator |
-| `contract_propose` | write | Edit a task contract — applied AND flagged with a review comment |
-| `design_propose` | write | Create a Draft design under an initiative (doc ref + structured proposal) — a *proposal*; humans review, compare, adopt |
-| `task_regenerate` | write | Re-plan one milestone in one verdict batch: planned tasks cancel, in-flight tasks survive, every contract flagged for review |
-| `initiative_create` | write | Create an initiative envelope (slug, title, why) — agents may draft it; the why stays human-edited |
-| `milestone_upsert` | write | One ladder edit (create/edit/reorder/remove) on an epic's milestones — authored intent; progress stays derived |
+| `pr_open` | write | Open the task's PR with its lineage: the branch renamed onto the `orun/<task-key>-<slug>` grammar when needed, pushed, and the machine-readable manifest block written into the body — the task, the skill revisions the session ran under, the session id |
 
-Five properties are structural, not policy:
+With a GitHub credential ambient (`GITHUB_TOKEN` / `GH_TOKEN` / `gh auth`)
+the PR opens through the API; without one the pen still prepares everything
+and returns the compare URL plus the body to use — honest either way. The
+same rules are checkable locally with `orun pr check`, and
+Orun Cloud's `orun/compliance` check verifies them on the PR itself.
 
-- **No `task_update_status` exists.** Lifecycle derives from delivery facts;
-  an agent moves a task to In Review by *opening a PR*, not by calling a tool.
-  Asserted by test — adding such a tool fails the suite.
-- **No pin tool exists.** Pins are public, attributed human overrides; the
-  cloud mutator additionally rejects agent pins server-side (defense in
-  depth, not client-side trust).
-- **No approve or adopt tool exists.** Epic approval and design adoption are
-  human-only decisions; the forbidden-tool sweep (`status`, `pin`,
-  `lifecycle`, `approve`, `adopt`) is asserted across the whole roster, and
-  the cloud rejects agent approval server-side regardless.
-- **`contract_propose` and `design_propose` cannot be quiet.** The write is
-  applied through the normal mutator *and* flagged for human review in the
-  same call — an agent cannot silently redefine its own definition of done,
-  or its own plan.
-- **Decision refusals are typed.** When a write brushes a human-only
-  decision, the cloud answers with its typed `human_only` verdict and the
-  MCP surfaces it verbatim — so a model can tell "not allowed for you"
-  from "does not exist".
+Outside a repository checkout the tool is not mounted at all, and
+`connection_info` reports the reason rather than the server guessing at git.
 
-## The platform plane (25 tools)
+## The platform plane (27 tools)
 
 Every platform tool calls the Orun Cloud public API with **your own
 credential** — RBAC, rate limits, audit, and metering apply exactly as they
 would to you. Results are one summary line plus compact JSON, byte-capped at
 64 KiB with cursor/`fromSeq` continuation.
-
-:::note Comparing this roster to the hosted MCP
-Orun Cloud's hosted MCP server also serves four work-plane reads —
-`initiatives_list`, `initiative_tree`, `task_get`, `activity_get` — because
-an agent connecting to it remotely has no orun binary, and so no work plane.
-Here you have both planes, so those four come from the work plane above and
-the platform plane cedes them. Same names, same shapes; only the provider
-behind them differs.
-:::
 
 ### Orientation
 
@@ -255,7 +213,6 @@ from `orun-work` when the surface unified).
 
 ## Related
 
-- [`orun initiatives`](./orun-initiatives.md) — the same work fold in the terminal
-- [`orun spec`](./orun-spec.md) — sealed briefs (`spec_get`'s CLI twin)
+- `orun pr` — the pen in the terminal (`pr_open`'s CLI twin) and its local preflight (`orun pr check`)
 - [`orun auth`](./orun-auth.md) / [`orun cloud`](./orun-cloud.md) — the
   session and repo link the server mounts from

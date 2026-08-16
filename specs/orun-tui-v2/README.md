@@ -1,5 +1,13 @@
 # Spec: orun-tui-v2 — the cockpit, rebuilt as the terminal head of orun cloud
 
+> **Post-teardown note.** This spec is an as-built record and names the work
+> plane as a dependency. That plane was retired whole by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 in this repo): `internal/worklens`, `internal/workmcp`,
+> `internal/workbrief`, the `orun work` / `orun epic` / `orun initiatives` /
+> `orun spec` CLI group and the cockpit's Work lane are gone, and its specs
+> are in [`specs/archive/`](../archive/). The cockpit's Work lane went with it; every other surface is unchanged.
+
 **The current cockpit works, but it fights its own renderer and drifts from the
 product.** `internal/tui` is 17.5k lines around a 2,481-line root model, seven
 internal modes squeezed under three tabs, five independent overlay booleans,

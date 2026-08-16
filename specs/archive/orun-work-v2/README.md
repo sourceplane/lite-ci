@@ -1,4 +1,14 @@
-# Spec: orun-work (v2)
+# Spec: orun-work (v2 — ARCHIVED)
+
+> **Retired.** The work programme — v2 here, plus v3/v4/v5, spaces and
+> initiatives — was deleted whole by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT1 in orun-cloud, WT2 here). `internal/worklens`, `internal/workmcp`,
+> `internal/workbrief` and the `orun work` / `orun spec` CLI group are gone;
+> the `work` schema was dropped by migration `1150_work_teardown_v2`. What
+> was worth keeping is in that epic's `carries-forward.md`. This file is a
+> frozen historical snapshot. See `specs/archive/README.md`.
+
 
 **orun gains a work plane built on one principle: author intent, derive state,
 coordinate socially. Every other tracker is a ledger of human opinions about

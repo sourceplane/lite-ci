@@ -1,4 +1,10 @@
-# Spec: orun-initiatives (the Initiatives surface — orun half)
+# Spec: orun-initiatives (the Initiatives surface — orun half; ARCHIVED)
+
+> **Retired** with the whole work programme by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 removed the orun half). Frozen historical snapshot; the durable
+> behaviour catalogue is that epic's `carries-forward.md`.
+
 
 **Work gets one name and one home: Initiatives. The truth model does not
 move — lifecycle stays the v2 derived fold, approval stays v4's human-only
