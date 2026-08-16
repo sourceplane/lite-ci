@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -74,9 +75,9 @@ func TestClassifyDoctorProbe(t *testing.T) {
 	if c := classifyDoctorProbe("platform API", "GET /v1/auth/profile", legacy, true); !strings.Contains(c.line, "not an Orun Cloud API endpoint") {
 		t.Errorf("legacy NOT_FOUND must flag the wrong backend: %+v", c)
 	}
-	// A work-route 404 is not over-claimed as a wrong backend.
-	if c := classifyDoctorProbe("work API", "GET work summary", notFound, false); c.ok || strings.Contains(c.line, "not an Orun Cloud API endpoint") {
-		t.Errorf("work 404 must not claim wrong-backend: %+v", c)
+	// A non-platform-route 404 is not over-claimed as a wrong backend.
+	if c := classifyDoctorProbe("skills API", "GET skills", notFound, false); c.ok || strings.Contains(c.line, "not an Orun Cloud API endpoint") {
+		t.Errorf("a non-platform 404 must not claim wrong-backend: %+v", c)
 	}
 
 	authErr := &remotestate.APIError{Code: "unauthorized", Message: "bad token", Status: 401}
@@ -160,5 +161,21 @@ func TestDescribeSessionAuth(t *testing.T) {
 	}
 	if strings.Contains(line, secret) || strings.Contains(line, refSecret) {
 		t.Fatalf("expired-session line leaks token material: %q", line)
+	}
+}
+
+// TestDoctorPen (WT2): the pen plane's row answers to the checkout, not to
+// auth — inside a repo it reports mounted with no credential in sight, and
+// outside one it warns rather than failing, because serve still starts.
+func TestDoctorPen(t *testing.T) {
+	inRepo := doctorPen(context.Background())
+	if !inRepo.ok || inRepo.warn || !strings.Contains(inRepo.line, "pr_open` mounts") {
+		t.Errorf("inside a checkout the pen must report mounted: %+v", inRepo)
+	}
+
+	t.Chdir(t.TempDir())
+	outside := doctorPen(context.Background())
+	if !outside.ok || !outside.warn || !strings.Contains(outside.line, "no repository checkout") {
+		t.Errorf("outside a checkout the pen must warn, not fail: %+v", outside)
 	}
 }

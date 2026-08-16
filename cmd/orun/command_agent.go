@@ -122,7 +122,7 @@ var agentImportCmd = &cobra.Command{
 seal each into a content-addressed AgentTypeSnapshot — persona verbatim as a
 body blob, the binary's base literacy pinned via extends — and move
 refs/agents/types/<name>/latest. Idempotent: an unchanged file re-seals to the
-same id (mirrors 'orun work import' for the work tree).`,
+same id.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := "agents"
