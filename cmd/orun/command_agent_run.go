@@ -19,7 +19,7 @@ import (
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/workmcp"
+	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/spf13/cobra"
 )
 
@@ -150,7 +150,7 @@ over the bytes on disk and recorded on the run.`,
 		var mcpConfigPath string
 		if runDriver == driver.ClaudeCodeID {
 			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
-				agent.NewToolPolicy(toolPolicy), workmcp.ToolNames(), nil)
+				agent.NewToolPolicy(toolPolicy), penmcp.ToolNames(), nil)
 			if mErr != nil {
 				return mErr
 			}
@@ -347,7 +347,7 @@ brief's tool policy filters.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "drivers    %v\n", driver.IDs())
-			fmt.Fprintf(out, "mcp tools  %d (orun mcp serve)\n", len(workmcp.ToolNames()))
+			fmt.Fprintf(out, "mcp tools  %d (orun mcp serve)\n", countMcpRoster().total())
 			path, err := exec.LookPath("claude")
 			if err != nil {
 				fmt.Fprintln(out, "claude     not found on PATH — `--driver claude-code` needs the Claude Code CLI")

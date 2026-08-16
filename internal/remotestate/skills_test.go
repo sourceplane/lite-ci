@@ -2,15 +2,57 @@ package remotestate_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sourceplane/orun/internal/remotestate"
 )
 
-// The IS5 skills endpoints, pinned to their routes: the org-scoped list
-// and the {name}[@rev] read (the @rev pin travels as one path segment).
+// The skills endpoints, pinned to their routes: the org-scoped list and the
+// {name}[@rev] read (the @rev pin travels as one path segment).
+
+// recordedCall is the last request a recording server saw.
+type recordedCall struct {
+	method string
+	path   string
+	query  string
+	body   map[string]interface{}
+}
+
+// recordingServer records every request and answers with the given payload
+// wrapped in the platform success envelope. It moved here at the work-plane
+// teardown (WT2) from the work client's test file, which went with the
+// client.
+func recordingServer(t *testing.T, payload interface{}) (*httptest.Server, *recordedCall) {
+	t.Helper()
+	rec := &recordedCall{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.method = r.Method
+		rec.path = r.URL.Path
+		rec.query = r.URL.RawQuery
+		rec.body = nil
+		if r.Body != nil {
+			var m map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&m); err == nil {
+				rec.body = m
+			}
+		}
+		writeJSON(w, 200, data(payload))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+func scopedTestClient(srv *httptest.Server) *remotestate.Client {
+	return remotestate.NewClientWithScope(srv.URL, "test",
+		remotestate.NewStaticTokenSource("tok"), remotestate.Scope{OrgID: "acme"})
+}
 
 func TestSkillsRoutes(t *testing.T) {
-	srv, rec := workServer(t, map[string]interface{}{
+	srv, rec := recordingServer(t, map[string]interface{}{
 		"name": "milestone-loop", "rev": "sha256:aa", "source": "org",
 		"frontmatter": map[string]interface{}{"title": "The milestone loop"},
 		"body":        "# The milestone loop\n",
@@ -18,7 +60,7 @@ func TestSkillsRoutes(t *testing.T) {
 			"name": "milestone-loop", "rev": "sha256:aa", "source": "default", "frontmatter": map[string]interface{}{},
 		}},
 	})
-	c := workTestClient(srv)
+	c := scopedTestClient(srv)
 
 	list, err := c.ListSkills(context.Background(), "acme")
 	if err != nil {

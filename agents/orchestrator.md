@@ -8,24 +8,13 @@ runtime:
   effort: high
 autonomyDefault: assist
 tools:
-  # The planner reads everything and proposes much, but decides nothing:
-  # structural writes ride the ask lane, and the four signatures (adopt,
-  # approve, revoke-approval, supersede) are not even nameable here — the
-  # epic-owner type (WK4 renamed) carries them, ask-tier. IS4 closes the
-  # deny-by-omission gap on the IN/v4/IS reads and gives the planner the
-  # agent's voice (narration allow; assertion and state moves ask).
-  allow: [work_query, work_get, spec_get, work_timeline, spec_doc,
-          epic_brief, milestone_get, design_get, initiative_get,
-          spaces_list, space_get, work_epics, epic_updates_get,
-          initiatives_list, initiative_tree, task_get, activity_get,
-          work_context, work_now, work_yours, initiative_updates_get,
-          catalog_get_component, catalog_affected, catalog_graph,
-          task_comment, task_note]
-  ask: [task_create, task_assign, item_assign, contract_propose,
-        design_propose, task_regenerate, initiative_create,
-        milestone_upsert, review_request, review_verdict, task_done,
-        space_create, space_update, epic_update_post, epic_status_set,
-        initiative_update_post, initiative_status_set]
+  # The planner reads the catalog and proposes much, but decides nothing:
+  # everything that writes rides the ask lane. The work-plane roster this
+  # lane was built around went with the plane (orun-work-teardown WT2);
+  # what remains is the blast-radius reading a plan is actually made of.
+  allow: [catalog_get_component, catalog_affected, catalog_graph,
+          connection_info, Read, Glob, Grep, LS, TodoWrite, NotebookRead]
+  ask: [WebFetch, WebSearch]
   deny: ["*"]
 owner: sourceplane/team/platform
 extends: base-orun-literacy

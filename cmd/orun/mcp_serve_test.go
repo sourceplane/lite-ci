@@ -83,7 +83,7 @@ func TestDegradedServeAssembly(t *testing.T) {
 
 // TestFullyMountedAssemblyRoster: with auth + workspace the roster is the
 // full merged surface PLUS connection_info (counts derived from the live
-// rosters — UM4 — with the current 46+1 pinned literally so a silent
+// rosters — UM4 — with the current total pinned literally so a silent
 // shrink fails loudly), and connection_info reports the all-ok posture.
 func TestFullyMountedAssemblyRoster(t *testing.T) {
 	// A real client, never called: Tools() is roster-only.
@@ -94,7 +94,7 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 		authSource:      "ORUN_TOKEN",
 		workspace:       "ws_1",
 		workspaceSource: "--workspace",
-		workMounted:     true, workReason: "workspace ws_1 (from --workspace)",
+		penMounted:      true, penReason: "repository checkout at .git",
 		platformMounted: true, platformReason: "auth resolved (ORUN_TOKEN)",
 	}
 	providers := assembleMcpProviders(client, rep, false)
@@ -115,14 +115,13 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 	responses = responses[1:]
 	tools := responses[0]["result"].(map[string]interface{})["tools"].([]interface{})
 	counts := countMcpRoster()
-	if want := counts.work + counts.platform + counts.server; len(tools) != want {
+	if want := counts.total(); len(tools) != want {
 		t.Fatalf("fully mounted roster = %d tools, want %d", len(tools), want)
 	}
-	// 65 → 73 at WK4 (orun-work-spaces §2): the Space/epic names land
-	// beside five IS-era aliases, visible one release then hidden-but-live
-	// (WK-6; steady state 68).
-	if len(tools) != 73 {
-		t.Fatalf("fully mounted roster = %d tools, want 73 (45 work + 27 platform + connection_info — WK4)", len(tools))
+	// 73 → 29 at WT2: the 45-tool work plane is gone; what mounts beside
+	// the platform roster is the pen it used to carry.
+	if len(tools) != 29 {
+		t.Fatalf("fully mounted roster = %d tools, want 29 (1 pen + 27 platform + connection_info — WT2)", len(tools))
 	}
 	last := tools[len(tools)-1].(map[string]interface{})
 	if last["name"] != "connection_info" {
@@ -209,13 +208,20 @@ func TestSessionMountState(t *testing.T) {
 // TestMcpServeLine: the default single stderr line names the degradation
 // and its fix; the healthy shapes stay exactly as before UM5.
 func TestMcpServeLine(t *testing.T) {
-	full := mcpMountReport{backendURL: "https://api.example", workspace: "ws_1", workMounted: true, platformMounted: true}
-	if line := mcpServeLine(full); !strings.Contains(line, "workspace ws_1; work + platform tools") {
+	full := mcpMountReport{backendURL: "https://api.example", workspace: "ws_1", penMounted: true, platformMounted: true}
+	if line := mcpServeLine(full); !strings.Contains(line, "workspace ws_1; pen + platform tools") {
 		t.Errorf("full line = %q", line)
 	}
 	platformOnly := mcpMountReport{backendURL: "https://api.example", platformMounted: true}
 	if line := mcpServeLine(platformOnly); !strings.Contains(line, "platform tools only") {
 		t.Errorf("platform-only line = %q", line)
+	}
+	// WT2: the pen needs a checkout, not a credential, so it is the one
+	// plane that can still mount on a serve with no cloud auth at all.
+	penOnly := degradedReport()
+	penOnly.penMounted, penOnly.penReason = true, "repository checkout at .git"
+	if line := mcpServeLine(penOnly); !strings.Contains(line, "pen tools only") {
+		t.Errorf("pen-only line = %q", line)
 	}
 	if line := mcpServeLine(degradedReport()); !strings.Contains(line, "degraded: not logged in") || !strings.Contains(line, "orun auth login") {
 		t.Errorf("degraded line = %q", line)
@@ -237,7 +243,7 @@ func TestMcpVerboseSummary(t *testing.T) {
 		expiresAt:       "2026-07-12T15:04:05Z",
 		workspace:       "ws_1",
 		workspaceSource: "--workspace",
-		workMounted:     true, workReason: "workspace ws_1 (from --workspace)",
+		penMounted:      true, penReason: "repository checkout at .git",
 		platformMounted: true, platformReason: "auth resolved (session)",
 	}
 	sum := mcpVerboseSummary(rep)
@@ -250,7 +256,7 @@ func TestMcpVerboseSummary(t *testing.T) {
 		"2026-07-12T15:04:05Z",
 		"workspace:",
 		"ws_1 (from --workspace)",
-		"plane work:",
+		"plane pen:",
 		"plane platform:",
 		"mounted — auth resolved (session)",
 		"plane server:",
@@ -284,12 +290,14 @@ func TestBuildMcpMountReportDegraded(t *testing.T) {
 	t.Setenv(orgEnvVar, "")
 	t.Setenv("HOME", t.TempDir())
 
-	// Bogus backend, no credentials: absent auth, both planes skipped.
+	// Bogus backend, no credentials: absent auth, the cloud plane skipped.
+	// The pen is not asserted either way here — it answers to the checkout,
+	// and this test runs inside one (see TestPenMountsOnTheCheckout).
 	client, rep := buildMcpMountReport(context.Background(), "http://127.0.0.1:1", "")
 	if client != nil {
 		t.Fatal("degraded resolution must not build a client")
 	}
-	if rep.authState != "absent" || rep.workMounted || rep.platformMounted {
+	if rep.authState != "absent" || rep.platformMounted {
 		t.Fatalf("degraded report = %+v", rep)
 	}
 	if !strings.Contains(rep.platformReason, "orun auth login") {
@@ -301,8 +309,8 @@ func TestBuildMcpMountReportDegraded(t *testing.T) {
 	if client != nil || rep.backendURL != "" || rep.backendErr == "" {
 		t.Fatalf("no-backend report = %+v (client=%v)", rep, client)
 	}
-	if rep.workMounted || rep.platformMounted {
-		t.Fatalf("no-backend planes must skip: %+v", rep)
+	if rep.platformMounted {
+		t.Fatalf("no-backend platform plane must skip: %+v", rep)
 	}
 	if fix := rep.connectionInfo().Fix; !strings.Contains(fix, "ORUN_BACKEND_URL") {
 		t.Fatalf("no-backend fix = %q", fix)
@@ -310,8 +318,9 @@ func TestBuildMcpMountReportDegraded(t *testing.T) {
 }
 
 // TestBuildMcpMountReportStaticToken: ORUN_TOKEN + a backend URL mounts the
-// platform plane (and work too when a workspace resolves) without any
-// network call.
+// platform plane without any network call, with or without a workspace —
+// since WT2 the workspace only scopes the platform plane's calls; it no
+// longer decides whether a second plane mounts.
 func TestBuildMcpMountReportStaticToken(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	t.Setenv("ORUN_TOKEN", "dummy")
@@ -327,12 +336,34 @@ func TestBuildMcpMountReportStaticToken(t *testing.T) {
 	if rep.authState != "ok" || rep.authSource != "ORUN_TOKEN" {
 		t.Fatalf("auth = %q/%q, want ok/ORUN_TOKEN", rep.authState, rep.authSource)
 	}
-	if !rep.platformMounted || rep.workMounted {
-		t.Fatalf("expected platform-only mount without a workspace: %+v", rep)
+	if !rep.platformMounted {
+		t.Fatalf("expected the platform plane to mount without a workspace: %+v", rep)
 	}
 
 	client, rep = buildMcpMountReport(context.Background(), "http://127.0.0.1:1", "ws_flag")
-	if client == nil || !rep.workMounted || rep.workspace != "ws_flag" || rep.workspaceSource != "--workspace" {
-		t.Fatalf("flagged workspace must mount work: %+v", rep)
+	if client == nil || rep.workspace != "ws_flag" || rep.workspaceSource != "--workspace" {
+		t.Fatalf("flagged workspace must resolve: %+v", rep)
+	}
+}
+
+// TestPenMountsOnTheCheckout (WT2): the pen plane's precondition is the
+// repository, not a credential and not a workspace. Inside a checkout it
+// mounts however badly the cloud resolution went; outside one it skips with
+// a reason that names the fix.
+func TestPenMountsOnTheCheckout(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("ORUN_TOKEN", "")
+	t.Setenv(backendURLEnvVar, "")
+	t.Setenv("HOME", t.TempDir())
+
+	_, rep := buildMcpMountReport(context.Background(), "", "")
+	if !rep.penMounted || !strings.Contains(rep.penReason, "repository checkout") {
+		t.Fatalf("inside a checkout with no credentials the pen must still mount: %+v", rep)
+	}
+
+	t.Chdir(t.TempDir()) // no repository here
+	_, rep = buildMcpMountReport(context.Background(), "", "")
+	if rep.penMounted || !strings.Contains(rep.penReason, "no repository checkout") {
+		t.Fatalf("outside a checkout the pen must skip with its reason: %+v", rep)
 	}
 }

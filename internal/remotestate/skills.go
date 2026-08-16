@@ -18,13 +18,23 @@ import (
 // the workspace argument travels with every call); CLI callers pass
 // their resolved scope's org.
 
+// Actor is a membership subject on the wire — the platform's principals
+// (usr_/sp_/team_ ids). Carried here since WT2, where the work plane that
+// used to define it was deleted; skills publishing still names who
+// published a revision.
+type Actor struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Via  string `json:"via,omitempty"`
+}
+
 // Skill is one skill revision's metadata (SkillSummary on the wire).
 type Skill struct {
 	Name        string                 `json:"name"`
 	Rev         string                 `json:"rev"`    // sha256:<hex> of the canonical body
 	Source      string                 `json:"source"` // default | org
 	Frontmatter map[string]interface{} `json:"frontmatter"`
-	PublishedBy *WorkActor             `json:"publishedBy,omitempty"`
+	PublishedBy *Actor                 `json:"publishedBy,omitempty"`
 	PublishedAt string                 `json:"publishedAt,omitempty"`
 }
 

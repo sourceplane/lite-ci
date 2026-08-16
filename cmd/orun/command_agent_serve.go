@@ -14,7 +14,7 @@ import (
 	"github.com/sourceplane/orun/internal/agent/ground"
 	"github.com/sourceplane/orun/internal/agenttype"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/workmcp"
+	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/spf13/cobra"
 )
 
@@ -266,7 +266,7 @@ Absent ORUN_REPO_REMOTE the session is ungrounded and boots exactly as before.`,
 		var mcpConfigPath string
 		if serveDriver == driver.ClaudeCodeID {
 			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
-				agent.NewToolPolicy(toolPolicy), workmcp.ToolNames(), nil)
+				agent.NewToolPolicy(toolPolicy), penmcp.ToolNames(), nil)
 			if mErr != nil {
 				return mErr
 			}

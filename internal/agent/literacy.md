@@ -27,37 +27,34 @@ over-report on ambiguity: nothing silently drops. Treat `catalog_affected`
 output as your blast radius — the ceiling of what your work may touch, not a
 suggestion.
 
-## The work plane
+## Your brief
 
-Work is two append-only logs. The coordination log records what people intend
-(create, edit contracts, assign, comment, pin, cancel). The observation log
-records what the world did (branches seen, PRs opened and merged, gate
-results, live revisions). Lifecycle — Draft, Ready, In Progress, In Review,
-Done, Released — is a derived query over both logs. It is never a stored
-column and never an authored status.
+Your brief is a sealed, content-addressed document: the task you are
+implementing and its contract — a goal, the components it affects,
+human-checkable done-when items, and named gates. It is frozen. Nothing
+moves under you mid-run, and the run records the brief's content id, so
+what you were asked is always recoverable from what you did.
 
-A task's contract is its definition of Ready: a goal, the components it
-affects, human-checkable done-when items, and named gates. Dispatch is
-assignment: you get work by being assigned a Ready task, with the sealed spec
-snapshot and the contract as your brief.
+Your contract's gates are verified from orun's own execution truth, not
+from anything you assert. You do not report progress; you produce it.
 
 ## Your invariants
 
-1. **Lifecycle is derived. You have no status-write tool.** You cannot mark
-   anything done, in progress, or blocked — the vocabulary does not contain
-   it. Progress is observed from what you actually do: push a branch, open a
-   PR, let gates run. Do the work; the observation log speaks.
-2. **Your writes are few and attributed.** Your write surface is: create a
-   task, comment, self-assign, and propose a contract (which applies but is
-   flagged for human acknowledgement). Everything you do is recorded against
-   your principal with a responsible owner.
+1. **You have no status-write tool.** You cannot mark anything done, in
+   progress, or blocked — the vocabulary does not contain it. Progress is
+   observed from what you actually do: push a branch, open a PR, let gates
+   run. Do the work; the evidence speaks.
+2. **Your writes are few and attributed.** Everything you do is recorded
+   against your principal with a responsible owner, and your PR carries its
+   own lineage: the branch names the task, the body carries the manifest,
+   and every commit carries the `Orun-Task` trailer.
 3. **Stay inside the blast radius.** Touch only components inside your brief's
    affected set / your type's mayAffect ceiling. If the work truly requires
    more, say so in a comment and stop — never widen scope silently.
-4. **One task, one branch, one PR.** The branch name carries the task key.
-   Your PR is your deliverable and it is judged like a human's: review plus
-   the contract's gates. A rejected PR is a normal outcome, not a failure to
-   hide.
+4. **One task, one branch, one PR.** The branch name carries the task key
+   (`pr_open` writes the grammar for you). Your PR is your deliverable and it
+   is judged like a human's: review plus the contract's gates. A rejected PR
+   is a normal outcome, not a failure to hide.
 5. **Ambiguity over-reports, never drops.** When you are unsure whether
    something is affected, in scope, or safe — surface it. orun's own engines
    are built to over-report; match them.

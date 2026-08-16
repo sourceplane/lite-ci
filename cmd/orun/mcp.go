@@ -8,29 +8,26 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
+	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/sourceplane/orun/internal/platformmcp"
-	"github.com/sourceplane/orun/internal/workmcp"
 )
 
 // mcpRosterCounts derives every tool count in the mcp help text from the
 // live rosters (UM4: zero hardcoded numbers — the field report caught the
 // help text drifting from the actual surface).
 type mcpRosterCounts struct {
-	work, workReads, workWrites             int
+	pen                                     int // the provenance pen (pr_open)
 	platform, platformReads, platformWrites int
 	server                                  int // built-in tools (UM5: connection_info)
 	resources, prompts                      int // platform-plane templates/prompts (UM6)
 }
 
+// total is the whole advertised surface of a fully mounted serve.
+func (c mcpRosterCounts) total() int { return c.pen + c.platform + c.server }
+
 func countMcpRoster() mcpRosterCounts {
 	var c mcpRosterCounts
-	for _, t := range workmcp.Tools() {
-		c.work++
-		if ro, _ := t.Annotations["readOnlyHint"].(bool); ro {
-			c.workReads++
-		}
-	}
-	c.workWrites = c.work - c.workReads
+	c.pen = len(penmcp.Tools())
 	c.platform = len((&platformmcp.Provider{}).Tools())
 	c.platformReads = len((&platformmcp.Provider{ReadOnly: true}).Tools())
 	c.platformWrites = c.platform - c.platformReads
@@ -44,13 +41,14 @@ func registerMcpCommand(root *cobra.Command) {
 	counts := countMcpRoster()
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "The orun MCP: one agent surface over the work and platform planes",
+		Short: "The orun MCP: one agent surface over the pen and platform planes",
 		Long: fmt.Sprintf(`The orun MCP (specs/orun-mcp) — the ecosystem's one local MCP.
 
 One stdio JSON-RPC loop composes two tool planes:
-  work      %d tools over the work plane (specs/orun-work WP5): %d reads +
-            %d mutator-only writes, derived lifecycle, sealed briefs.
-            Mounted when a workspace scope resolves.
+  pen       %d tool over the provenance pen: pr_open writes a PR's lineage
+            into the branch name and the body's manifest, which the cloud's
+            orun/compliance check then verifies. Mounted when the serve runs
+            inside a repository checkout.
   platform  %d tools over the Orun Cloud public API — %d reads (catalog,
             runs and logs, audit, events, access, usage, billing, config,
             webhooks) + %d writes (project/environment create, flag set,
@@ -70,7 +68,7 @@ Subcommands:
   serve    Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
   tools    Print the merged tool roster
   doctor   Diagnose the serve preconditions (binary, auth, workspace, backend)`,
-			counts.work, counts.workReads, counts.workWrites,
+			counts.pen,
 			counts.platform, counts.platformReads, counts.platformWrites,
 			counts.platformWrites, counts.resources, counts.prompts, counts.server),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -100,11 +98,11 @@ func registerMcpToolsCommand(parent *cobra.Command) {
 				Description string `json:"description"`
 			}
 			var rows []row
-			for _, t := range (&workmcp.Server{}).Tools() {
+			for _, t := range (&penmcp.Provider{}).Tools() {
 				// The read-only column is the wire annotation itself (UM4) —
 				// the display can never disagree with what a client sees.
 				ro, _ := t.Annotations["readOnlyHint"].(bool)
-				rows = append(rows, row{t.Name, "work", ro, t.Description})
+				rows = append(rows, row{t.Name, "pen", ro, t.Description})
 			}
 			for _, t := range (&platformmcp.Provider{ReadOnly: readOnly}).Tools() {
 				ro, _ := t.Annotations["readOnlyHint"].(bool)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -173,4 +174,15 @@ func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdi
 		fmt.Fprintf(errOut, "orun agent: skill pins not recorded (%v)\n", err)
 	}
 	fmt.Fprintf(errOut, "orun agent: %d skill(s) materialized into %s (pins recorded for the manifest)\n", len(pins), skillsDir)
+}
+
+// shortRevision shortens a sha256:<hex> content address to its familiar
+// 8-hex form. It moved here at the work-plane teardown (WT2) from the CLI
+// group that used to define it; skills are content-addressed the same way.
+func shortRevision(rev string) string {
+	r := strings.TrimPrefix(rev, "sha256:")
+	if len(r) > 8 {
+		r = r[:8]
+	}
+	return r
 }

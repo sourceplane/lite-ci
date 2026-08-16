@@ -7,8 +7,8 @@
 //
 // This package is pure rules + rendering; the side-effectful half (branch,
 // push, the GitHub API call) lives in pen.go. IS7 pins `orun pr check` and
-// the cloud evaluator byte-identical on shared fixtures (the worklens
-// pattern); Verify's findings are the seam that engine grows from.
+// the cloud evaluator byte-identical on shared fixtures; Verify's findings
+// are the seam that engine grows from.
 package provenance
 
 import (

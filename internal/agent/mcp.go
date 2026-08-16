@@ -12,7 +12,7 @@ import (
 // mcp.go — the driver's hands (specs/orun-agents/design.md §5, landed with
 // orun-agents-live AL1): write the MCP config a driver points its harness at,
 // filtered through the agent type's tool policy at write time. The orun MCP
-// (`orun mcp serve`, internal/workmcp) is always present; the platform MCP is
+// (`orun mcp serve`) is always present; the platform MCP is
 // added when cloud-attached (AL4). Enforcement is layered: deny tools are
 // absent from the reachable surface here, AND the runtime fold denies them
 // again if a harness reports one anyway — the config is convenience, the
@@ -62,7 +62,7 @@ func orunCommand() string {
 
 // WriteMCPConfig writes the driver MCP config into dir and derives the
 // harness tool gates from policy over the orun MCP tool surface (toolNames —
-// workmcp.ToolNames() in production; injected for tests). extra servers
+// penmcp.ToolNames() in production; injected for tests). extra servers
 // (the platform MCP, cloud-attached) are merged under their given names.
 func WriteMCPConfig(dir string, policy ToolPolicy, toolNames []string, extra map[string]MCPServer) (MCPSetup, error) {
 	servers := map[string]MCPServer{

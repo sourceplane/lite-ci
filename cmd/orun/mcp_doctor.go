@@ -263,19 +263,13 @@ func resolveDoctorWorkspace(flagWS, envWS, intentWS, linkWS string) (value, sour
 }
 
 // doctorBackendProbes GETs one platform route (/v1/auth/profile — every
-// Orun Cloud api-edge serves it) and, when a workspace resolved, one work
-// route, with the resolved credential, and classifies each plane's answer.
+// Orun Cloud api-edge serves it) with the resolved credential and
+// classifies the answer. Since WT2 the platform plane is the serve's only
+// cloud-backed plane; the pen needs a checkout, not a backend, and its
+// mount is reported separately.
 func doctorBackendProbes(ctx context.Context, client *remotestate.Client, backendURL, ws string) []doctorCheck {
 	_, perr := client.GetAuthProfile(ctx)
-	checks := []doctorCheck{classifyDoctorProbe("platform API", "GET "+backendURL+"/v1/auth/profile", perr, true)}
-	if ws == "" {
-		checks = append(checks, doctorCheck{name: "work API", ok: true, warn: true,
-			line: "skipped — no workspace resolved (work tools would not mount)"})
-		return checks
-	}
-	_, werr := client.GetWorkSummary(ctx)
-	checks = append(checks, classifyDoctorProbe("work API", "GET work summary (workspace "+ws+")", werr, false))
-	return checks
+	return []doctorCheck{classifyDoctorProbe("platform API", "GET "+backendURL+"/v1/auth/profile", perr, true)}
 }
 
 // classifyDoctorProbe turns one probe result into a row. platformRoute

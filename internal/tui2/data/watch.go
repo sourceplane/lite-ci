@@ -61,8 +61,6 @@ func (w *watcher) topicDirs() map[string]Topic {
 		filepath.Join(w.orunRoot, "objectmodel", "run"): TopicRuns,
 		filepath.Join(w.orunRoot, "agents", "live"):     TopicSessions,
 		filepath.Join(w.orunRoot, "plans"):              TopicRuns,
-		filepath.Join(w.orunRoot, "epics"):              TopicWork,
-		filepath.Join(w.orunRoot, "specs"):              TopicWork,
 	}
 }
 

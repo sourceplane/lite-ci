@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
-	"github.com/sourceplane/orun/internal/workmcp"
+	"github.com/sourceplane/orun/internal/penmcp"
 )
 
 var promptNames = []string{"investigate_failed_run", "access_review", "usage_review", "service_snapshot"}
@@ -97,12 +97,12 @@ func TestPromptBranches(t *testing.T) {
 }
 
 // TestPromptToolDriftGuard ports the TS plane's guard: every snake_case
-// token in rendered prompt text must be a tool on the composed roster (work
-// + platform + built-in — the 47 tools one serve advertises), so a tool
+// token in rendered prompt text must be a tool on the composed roster (pen
+// + platform + built-in — everything one serve advertises), so a tool
 // rename breaks this test instead of silently orphaning a prompt.
 func TestPromptToolDriftGuard(t *testing.T) {
 	roster := map[string]bool{}
-	for _, tool := range workmcp.Tools() {
+	for _, tool := range penmcp.Tools() {
 		roster[tool.Name] = true
 	}
 	for _, tool := range (&Provider{}).Tools() {
@@ -111,10 +111,10 @@ func TestPromptToolDriftGuard(t *testing.T) {
 	for _, tool := range (&mcpserve.ConnectionInfoProvider{}).Tools() {
 		roster[tool.Name] = true
 	}
-	// 65 → 73 at WK4 (orun-work-spaces §2): the Space/epic names beside
-	// five IS-era aliases, visible one release then hidden-but-live (WK-6).
-	if len(roster) != 73 {
-		t.Fatalf("composed roster = %d tools, want 73 (45 work + 27 platform + 1 built-in — WK4)", len(roster))
+	// 73 → 29 at WT2: the 45-tool work plane is gone, and the pen it used
+	// to carry stands on its own.
+	if len(roster) != 29 {
+		t.Fatalf("composed roster = %d tools, want 29 (1 pen + 27 platform + 1 built-in — WT2)", len(roster))
 	}
 
 	tokenPattern := regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)
