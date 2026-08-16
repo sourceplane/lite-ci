@@ -1,7 +1,8 @@
 // Package mcpserve is the shared stdio MCP transport (orun-mcp UM0): one
 // newline-delimited JSON-RPC 2.0 loop composing tool providers. The loop
 // (16 MiB scanner, initialize/ping/tools handling, notification silence,
-// error codes) moved verbatim from internal/workmcp; what is new is only
+// error codes) moved verbatim from the work MCP that preceded it (retired
+// at orun-work-teardown WT2); what is new is only
 // the composition — `tools/list` merges provider rosters in order and
 // `tools/call` routes to the owning provider. serverInfo is `orun` (the
 // binary), never a per-provider name: the agent connects to one MCP and

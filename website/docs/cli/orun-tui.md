@@ -245,7 +245,7 @@ Writes are best-effort and silent — a missing or corrupt prefs file falls back
 
 A ground-up rebuild of the cockpit — **cockpit v2** (`specs/orun-tui-v2`) —
 ships as a preview. It is the terminal head of orun cloud: the same surfaces
-the console shows (**Home · Work · Agents · Activity · Catalog · Events**),
+the console shows (**Home · Agents · Activity · Catalog · Events**),
 over the same state store, stream-driven (fs-watch + step-level run events,
 no polling) and frame-stable by construction. It becomes the default
 `orun tui` after the cloud lanes land and a release has soaked.
@@ -257,7 +257,7 @@ orun agent --next      # the cockpit v2, opened on the Agents surface
 ORUN_TUI=next orun     # opt in for bare `orun` / `orun tui` / `orun agent`
 ```
 
-Inside: `1–7` switch surfaces, `:` or `ctrl+k` opens the command palette
+Inside: number keys switch surfaces, `:` or `ctrl+k` opens the command palette
 (every action lives there), `?` shows generated help, `esc` always goes back
 and never quits, `ctrl+c` twice quits. Agent sessions are composer-first
 conversations: `enter` steers, `esc` interrupts, `ctrl+d` detaches,

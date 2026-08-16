@@ -14,9 +14,12 @@ func TestLiteracyEmbedded(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatal("embedded literacy empty")
 	}
-	// The invariants the whole design leans on must be stated.
+	// The invariants the whole design leans on must be stated. "Lifecycle
+	// is derived" was one of them until WT2 retired the plane that derived
+	// it; the brief's content address is what now makes "you cannot report
+	// your own state" enforceable rather than merely asked for.
 	for _, want := range []string{
-		"Lifecycle is derived",
+		"content-addressed",
 		"status-write tool",
 		"blast radius",
 		"secret://",

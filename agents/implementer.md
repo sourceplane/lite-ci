@@ -9,26 +9,15 @@ runtime:
   maxTokens: 64000
 autonomyDefault: assist
 tools:
-  # Work-plane reads + the harness's read/plan tools pass; everything that
-  # writes (shell, edits, web, work-plane mutations) rides the ask lane —
-  # autonomy `assist` means a head approves each one. deny:["*"] backstops.
-  # IS4 closes the deny-by-omission gap: the FULL work read surface is
-  # allow (an implementer reads the world it implements against —
-  # work_context first, epic_brief before writing a line), and the agent's
-  # voice is allow — task_note narration is exactly what a working seat
-  # owes, task_done is the weakest voice and demands its note. The
-  # signatures (adopt/approve/revoke/supersede) are not this type's
-  # business and stay deny-by-omission: it cannot even name them.
-  allow: [work_query, work_get, spec_get, work_timeline, spec_doc,
-          epic_brief, milestone_get, design_get, initiative_get,
-          spaces_list, space_get, work_epics, epic_updates_get,
-          initiatives_list, initiative_tree, task_get, activity_get,
-          work_context, work_now, work_yours, initiative_updates_get,
-          catalog_get_component, catalog_affected, task_comment,
-          task_note, task_done, pr_open, connection_info,
+  # The harness's read/plan tools pass; everything that writes (shell,
+  # edits, web) rides the ask lane — autonomy `assist` means a head
+  # approves each one. deny:["*"] backstops. The work-plane reads this
+  # lane used to carry went with the plane (orun-work-teardown WT2); what
+  # an implementer still owes is the pen — one task, one PR, lineage in
+  # the body.
+  allow: [catalog_get_component, catalog_affected, pr_open, connection_info,
           Read, Glob, Grep, LS, TodoWrite, NotebookRead]
-  ask: [contract_propose, task_assign, item_assign, review_request,
-        Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
+  ask: [Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch]
   deny: ["*"]
 owner: sourceplane/team/platform
 extends: base-orun-literacy

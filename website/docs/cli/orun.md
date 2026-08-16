@@ -28,9 +28,9 @@ The root `orun` command is the entry point for planning, inspection, and executi
 | [`orun secrets`](./orun-secrets.md) | Manage workspace secrets (secret:// references in plans) |
 | [`orun integrations`](./orun-integrations.md) | Integration connections, scope templates, and integration-owned secret authoring |
 | [`orun policy`](./orun-policy.md) | Manage and test the portable secret-access policy |
-| `orun work` | The work lens: import spec trees, list delivery-derived task rungs |
-| `orun spec` | Pull sealed, content-addressed spec briefs to implement against |
-| `orun mcp` | Serve the orun MCP over stdio: work-plane and platform tools for agents |
+| `orun pr` | The provenance pen: open a task's PR with its lineage, preflight the rules locally |
+| `orun skills` | Hosted agent playbooks: list the registry, pull native skill files |
+| `orun mcp` | Serve the orun MCP over stdio: the pen and platform tools for agents |
 | `orun completion` | Generate shell completion scripts |
 
 ## Global flags

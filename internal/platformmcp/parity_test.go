@@ -20,9 +20,9 @@ import (
 // description / schema / annotation drift — over the whole advertised roster
 // since UM2 (reads and writes alike).
 //
-// The manifest carries 31 tools; 4 are ceded to the native work plane
-// (cededToWorkPlane), so this plane advertises 27. Parity is asserted over
-// the advertised subset, and the ceded names get their own assertions below.
+// The manifest carries 27 tools and this plane advertises all of them. It
+// advertised a subset until WT2, when the four work-plane reads it used to
+// cede left the TS manifest with the plane that served them.
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -120,8 +120,8 @@ func TestManifestParity(t *testing.T) {
 	if m.ToolCount != len(m.Tools) {
 		t.Fatalf("manifest toolCount %d != %d tools", m.ToolCount, len(m.Tools))
 	}
-	if len(m.Tools) != 31 {
-		t.Fatalf("IS5 expects 31 tools in the manifest, it carries %d", len(m.Tools))
+	if len(m.Tools) != 27 {
+		t.Fatalf("WT2 expects 27 tools in the manifest, it carries %d", len(m.Tools))
 	}
 
 	var manifestReads int
@@ -131,9 +131,6 @@ func TestManifestParity(t *testing.T) {
 		if ro {
 			manifestReads++
 		}
-		if cededToWorkPlane[tool.Name] {
-			continue
-		}
 		wantAll = append(wantAll, tool)
 		if ro {
 			wantReads = append(wantReads, tool)
@@ -142,14 +139,14 @@ func TestManifestParity(t *testing.T) {
 	if manifestReads != m.ReadOnlyToolCount {
 		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, manifestReads)
 	}
-	if manifestReads != 25 {
-		t.Fatalf("IS5 expects 25 read tools in the manifest, it carries %d", manifestReads)
+	if manifestReads != 21 {
+		t.Fatalf("WT2 expects 21 read tools in the manifest, it carries %d", manifestReads)
 	}
 	if len(wantAll) != 27 {
-		t.Fatalf("UM2 expects 27 advertised tools after ceding, got %d", len(wantAll))
+		t.Fatalf("WT2 expects 27 advertised tools, got %d", len(wantAll))
 	}
 	if len(wantReads) != 21 {
-		t.Fatalf("UM2 expects 21 advertised read tools after ceding, got %d", len(wantReads))
+		t.Fatalf("WT2 expects 21 advertised read tools, got %d", len(wantReads))
 	}
 
 	for _, tc := range []struct {
@@ -189,56 +186,31 @@ func TestManifestParity(t *testing.T) {
 	}
 }
 
-// TestCededNamesResolveInTheManifest is the staleness guard on
-// cededToWorkPlane: every entry must still name a tool the vendored manifest
-// carries. A re-vendor that renames or drops one of the four leaves a dead
-// entry that silently cedes nothing — caught here rather than at serve time.
-func TestCededNamesResolveInTheManifest(t *testing.T) {
+// TestNoWorkPlaneNamesSurvive: the four reads this plane used to cede to
+// internal/workmcp — initiatives_list, initiative_tree, task_get,
+// activity_get — left the TS manifest with the work plane at WT2. If a
+// later re-vendor reintroduces a name no local plane serves, the ceding
+// machinery is gone and the plane would advertise a tool it cannot answer,
+// so the guard now runs the other way: those names must not come back
+// without an implementation.
+func TestNoWorkPlaneNamesSurvive(t *testing.T) {
 	var m manifest
 	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
 		t.Fatalf("parse vendored manifest: %v", err)
 	}
-	inManifest := map[string]bool{}
+	retired := map[string]bool{
+		"initiatives_list": true, "initiative_tree": true,
+		"task_get": true, "activity_get": true,
+	}
 	for _, tool := range m.Tools {
-		inManifest[tool.Name] = true
-	}
-	for name := range cededToWorkPlane {
-		if !inManifest[name] {
-			t.Errorf("cededToWorkPlane names %q, which the vendored manifest no longer carries — drop the entry", name)
+		if retired[tool.Name] {
+			t.Errorf("vendored manifest carries %q — a retired work-plane tool; this plane has no implementation for it", tool.Name)
 		}
 	}
-	if len(cededToWorkPlane) != 4 {
-		t.Errorf("cededToWorkPlane holds %d names, want the 4 work-plane reads", len(cededToWorkPlane))
-	}
-}
-
-// TestCededToolsAreNeitherAdvertisedNorOwned: the four work-plane reads are
-// absent from both rosters and disowned by Call, so mcpserve routes them to
-// internal/workmcp instead of this plane answering "unknown tool". Ceding
-// them is also what keeps mcpserve.checkRoster from rejecting the composed
-// server outright — the two planes would otherwise share four names.
-func TestCededToolsAreNeitherAdvertisedNorOwned(t *testing.T) {
-	for _, mode := range []struct {
-		name string
-		p    *Provider
-	}{
-		{"full", &Provider{}},
-		{"read-only", &Provider{ReadOnly: true}},
-		{"with-default-workspace", &Provider{DefaultWorkspace: "ws_ambient"}},
-	} {
-		for _, tool := range mode.p.Tools() {
-			if cededToWorkPlane[tool.Name] {
-				t.Errorf("%s: %s is ceded to the work plane but still advertised", mode.name, tool.Name)
-			}
-		}
-	}
-
-	// Disowned at dispatch: owned=false is what lets the composed server fall
-	// through to the work provider.
 	p := &Provider{}
-	for name := range cededToWorkPlane {
+	for name := range retired {
 		if _, owned := p.Call(context.Background(), name, nil); owned {
-			t.Errorf("%s: Call claims ownership of a ceded tool", name)
+			t.Errorf("%s: Call claims ownership of a retired work-plane tool", name)
 		}
 	}
 }

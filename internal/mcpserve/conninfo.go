@@ -6,7 +6,7 @@ package mcpserve
 // initialize, always lists at least one tool, and can always ask the server
 // itself why the other planes are (or are not) there. The provider only
 // REPORTS a snapshot the command layer hands it at startup; it never calls
-// the backend (deliberately no remotestate/workmcp/platformmcp imports) and
+// the backend (deliberately no remotestate/penmcp/platformmcp imports) and
 // never carries token material.
 
 import (
@@ -16,13 +16,10 @@ import (
 
 // ConnectionInfoToolName is the built-in tool's wire name.
 //
-// Naming: this tool was planned as `auth_status`, but "status" is a
-// ForbiddenNameFragment — the WP-3/WP-10 work-plane sweep bans lifecycle
-// vocabulary (status/pin/lifecycle/approve/adopt) across the whole merged
-// roster, and weakening the sweep to admit one built-in would weaken the
-// work-plane invariant it guards. `connection_info` carries no forbidden
-// fragment and still self-describes: it reports the connection's
-// auth/backend/plane posture.
+// Naming: this tool was planned as `auth_status`, but "status" was a
+// ForbiddenNameFragment under the work plane's roster sweep (retired with
+// the plane at WT2). The name stayed: `connection_info` self-describes
+// better anyway — it reports the connection's auth/backend/plane posture.
 const ConnectionInfoToolName = "connection_info"
 
 // PlaneMount is one tool plane's mount outcome: mounted or skipped, with
@@ -41,7 +38,7 @@ type ConnectionInfo struct {
 	AuthSource string // e.g. "GitHub Actions OIDC", "ORUN_TOKEN", "session"; empty when none resolved
 	ExpiresAt  string // RFC3339 access-token expiry when known (session auth)
 	BackendURL string // empty when unresolved (reported as null on the wire)
-	Work       PlaneMount
+	Pen        PlaneMount
 	Platform   PlaneMount
 	Fix        string // the exact command that repairs a degraded mount; empty when healthy
 }
@@ -67,7 +64,7 @@ func (p *ConnectionInfoProvider) Tools() []ToolDef {
 
 // Call implements ToolProvider: the snapshot rendered as one JSON object —
 // {auth: {state, source?, expiresAt?}, backendUrl: string|null,
-// planes: {work: {state, reason?}, platform: {state, reason?}},
+// planes: {pen: {state, reason?}, platform: {state, reason?}},
 // fix?: string, doctor: string}.
 func (p *ConnectionInfoProvider) Call(_ context.Context, name string, _ json.RawMessage) (Result, bool) {
 	if name != ConnectionInfoToolName {
@@ -88,7 +85,7 @@ func (p *ConnectionInfoProvider) Call(_ context.Context, name string, _ json.Raw
 		"auth":       auth,
 		"backendUrl": backendURL,
 		"planes": map[string]interface{}{
-			"work":     planePayload(p.Info.Work),
+			"pen":      planePayload(p.Info.Pen),
 			"platform": planePayload(p.Info.Platform),
 		},
 		"doctor": "run `orun mcp doctor` for a full check",

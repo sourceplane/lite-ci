@@ -1,5 +1,15 @@
 # Spec: orun-agents — the agent runtime
 
+> **Post-teardown note.** This spec is an as-built record and names the work
+> plane as a dependency. That plane was retired whole by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 in this repo): `internal/worklens`, `internal/workmcp`,
+> `internal/workbrief`, the `orun work` / `orun epic` / `orun initiatives` /
+> `orun spec` CLI group and the cockpit's Work lane are gone, and its specs
+> are in [`specs/archive/`](../archive/). The runtime survived untouched (WT-1): its one coupling, the task contract,
+> moved to `internal/contract` and `orun agent run --spec` now reads a sealed
+> brief from a local file rather than a cloud pull.
+
 **The orun binary is the agent runtime.** orun already compiles intent,
 resolves the catalog, computes the affected set, and coordinates runs; this
 epic makes it also **delegate work to a coding agent** — Claude Code first,

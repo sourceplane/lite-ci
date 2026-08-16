@@ -24,7 +24,7 @@ import (
 	"github.com/sourceplane/orun/internal/platformmcp"
 	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/workmcp"
+	"github.com/sourceplane/orun/internal/penmcp"
 )
 
 // mcpMountReport is the serve-time resolution outcome, per concern. It
@@ -42,16 +42,18 @@ type mcpMountReport struct {
 	workspace       string // resolved workspace; "" when none
 	workspaceSource string // the winning resolution rung
 
-	workMounted     bool
-	workReason      string
+	penMounted      bool
+	penReason       string
 	platformMounted bool
 	platformReason  string
 }
 
-// planesSkipped marks both tool planes unmounted for one shared reason.
+// planesSkipped marks the cloud-dependent plane unmounted for one shared
+// reason. The pen plane is untouched: it needs a checkout, not a
+// credential, and its mount is decided on its own terms (WT2).
 func (r mcpMountReport) planesSkipped(reason string) mcpMountReport {
-	r.workMounted, r.platformMounted = false, false
-	r.workReason, r.platformReason = reason, reason
+	r.platformMounted = false
+	r.platformReason = reason
 	return r
 }
 
@@ -85,6 +87,15 @@ func buildMcpMountReport(ctx context.Context, backendURLFlag, orgFlag string) (*
 	envWS := preferWorkspace(os.Getenv(workspaceEnvVar), os.Getenv(orgEnvVar))
 	rep.workspace = scope.OrgID
 	_, rep.workspaceSource = resolveDoctorWorkspace(orgFlag, envWS, intentOrg, linkOrg)
+
+	// The pen plane's precondition is the checkout, not a credential: it
+	// renames and pushes a branch and writes a PR body. It is resolved
+	// before the cloud chain and survives every degradation below.
+	if gitDir, gerr := gitOut(ctx, "rev-parse", "--git-dir"); gerr == nil && gitDir != "" {
+		rep.penMounted, rep.penReason = true, "repository checkout at "+gitDir
+	} else {
+		rep.penReason = "no repository checkout here — run the serve from inside the repo"
+	}
 
 	// Auth: which source resolves (OIDC in CI > ORUN_TOKEN > local session)
 	// — attempted even without a backend URL so the report stays truthful
@@ -140,11 +151,6 @@ func buildMcpMountReport(ctx context.Context, backendURLFlag, orgFlag string) (*
 	// Auth resolved (ok, or expired — expired mounts too: the planes fail
 	// per-call with the login hint, the same degradation shape as absent).
 	rep.platformMounted, rep.platformReason = true, "auth resolved ("+rep.authSource+")"
-	if rep.workspace != "" {
-		rep.workMounted, rep.workReason = true, fmt.Sprintf("workspace %s (from %s)", rep.workspace, rep.workspaceSource)
-	} else {
-		rep.workReason = "no workspace resolved — pass --workspace or run `orun cloud link`"
-	}
 	return remotestate.NewClientWithScope(backendURL, version, resolved.TokenSource, scope), rep
 }
 
@@ -181,7 +187,7 @@ func (r mcpMountReport) connectionInfo() mcpserve.ConnectionInfo {
 		AuthSource: r.authSource,
 		ExpiresAt:  r.expiresAt,
 		BackendURL: r.backendURL,
-		Work:       mcpserve.PlaneMount{Mounted: r.workMounted, Reason: r.workReason},
+		Pen:        mcpserve.PlaneMount{Mounted: r.penMounted, Reason: r.penReason},
 		Platform:   mcpserve.PlaneMount{Mounted: r.platformMounted, Reason: r.platformReason},
 	}
 	switch {
@@ -194,18 +200,18 @@ func (r mcpMountReport) connectionInfo() mcpserve.ConnectionInfo {
 }
 
 // assembleMcpProviders builds the provider list the composed server mounts:
-// work when a workspace resolved, platform when auth resolved, and the
-// built-in connection_info provider ALWAYS — the degraded server's only
-// tool, and the fully mounted server's extra one.
+// the pen when the serve sits in a checkout, platform when auth resolved,
+// and the built-in connection_info provider ALWAYS — the degraded server's
+// only tool, and the fully mounted server's extra one.
 func assembleMcpProviders(client *remotestate.Client, rep mcpMountReport, readOnly bool) []mcpserve.ToolProvider {
 	var providers []mcpserve.ToolProvider
-	if rep.workMounted {
-		// IS6: the provenance pen mounts with the work plane — pr_open acts
-		// on the serve's cwd (the harness spawns this server in its workdir,
-		// i.e. the checkout). The pen fills the manifest with the session's
-		// recorded skill pins; a repo-less serve answers pr_open with a
-		// clear verdict instead.
-		providers = append(providers, &workmcp.Server{API: client, Workspace: rep.workspace, Pen: servePen()})
+	if rep.penMounted {
+		// pr_open acts on the serve's cwd (the harness spawns this server
+		// in its workdir, i.e. the checkout). The pen fills the manifest
+		// with the session's recorded skill pins. Since WT2 the pen mounts
+		// on the repository alone — it never needed the workspace it used
+		// to ride in on.
+		providers = append(providers, &penmcp.Provider{Pen: servePen()})
 	}
 	if rep.platformMounted {
 		providers = append(providers, &platformmcp.Provider{API: client, DefaultWorkspace: rep.workspace, ReadOnly: readOnly})
@@ -218,10 +224,12 @@ func assembleMcpProviders(client *remotestate.Client, rep mcpMountReport, readOn
 // degraded — the fix, right where the operator is looking.
 func mcpServeLine(r mcpMountReport) string {
 	switch {
-	case r.workMounted && r.platformMounted:
-		return "orun MCP serving on stdio (workspace " + r.workspace + "; work + platform tools)"
+	case r.penMounted && r.platformMounted:
+		return "orun MCP serving on stdio (workspace " + r.workspace + "; pen + platform tools)"
 	case r.platformMounted:
-		return "orun MCP serving on stdio (no workspace resolved: platform tools only — pass --workspace or link the repo to mount work tools)"
+		return "orun MCP serving on stdio (platform tools only — no repository checkout here, so the pen is not mounted)"
+	case r.penMounted:
+		return "orun MCP serving on stdio (pen tools only — " + r.platformReason + ")"
 	case r.backendURL == "":
 		return "orun MCP serving on stdio (degraded: no backend URL — set ORUN_BACKEND_URL or run `orun auth login`; only connection_info is available)"
 	default:
@@ -263,7 +271,7 @@ func mcpVerboseSummary(r mcpMountReport) string {
 		}
 		return "skipped — " + reason
 	}
-	line("plane work", plane(r.workMounted, r.workReason))
+	line("plane pen", plane(r.penMounted, r.penReason))
 	line("plane platform", plane(r.platformMounted, r.platformReason))
 	line("plane server", "mounted — connection_info (always present)")
 	return b.String()
@@ -297,7 +305,7 @@ func registerMcpServeCommand(parent *cobra.Command, counts mcpRosterCounts) {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
 	cmd.Flags().StringVar(&backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	cmd.Flags().BoolVar(&readOnly, "read-only", false, fmt.Sprintf("serve only the platform plane's read tools (drops the %d platform writes; work tools are mutator-shaped by design — WP-6 — and unaffected)", counts.platformWrites))
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, fmt.Sprintf("serve only the platform plane's read tools (drops the %d platform writes; the pen writes by definition and is unaffected)", counts.platformWrites))
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a multi-line startup summary to stderr (planes mounted and why, auth source, token expiry, workspace source, backend URL)")
 	parent.AddCommand(cmd)
 }
@@ -305,7 +313,7 @@ func registerMcpServeCommand(parent *cobra.Command, counts mcpRosterCounts) {
 // servePen builds the pr_open pen for this serve: the cwd's repository,
 // the ambient GitHub credential, and the session's recorded skill pins
 // (IS6a's skills.json) folded into every manifest it writes.
-func servePen() workmcp.ProvenancePen {
+func servePen() penmcp.Pen {
 	return penWithSessionManifest{}
 }
 

@@ -96,16 +96,48 @@ product surface.
 - **Status:** Superseded — scrapped before any UI shipped. The platform moved
   under the spec (Postgres backend, SC1–SC8 landed, workspace tenancy + Teams
   RBAC), and the stored-status ontology was replaced wholesale.
-- **Superseded by:** [`specs/orun-work/`](../orun-work/) (v2) — the
+- **Superseded by:** [`orun-work-v2/`](./orun-work-v2/) — the
   intent/fact/coordination split: lifecycle becomes a *derived query* over two
   append-only logs (coordination + observation), never a stored column; work
-  kinds join the shipped service-catalog graph directly.
+  kinds join the shipped service-catalog graph directly. v2 was itself
+  retired — see the work-programme entry below.
 - **Code today:** the v1 cores (`internal/work`, `internal/workbridge`,
   orun-cloud `packages/db/src/work/`) were deleted when this spec was archived;
   the unused `work` schema is dropped by orun-cloud migration
   `470_work_teardown`. The v1 invariants that survive (append-only events,
   mandatory actor provenance, one write path, seal determinism) carry forward
   into v2.
+
+### `orun-work-v2/`, `orun-work-v4/`, `orun-initiatives/`, `orun-initiatives-v2/` — the work programme
+
+The whole work plane, in the order it was built: **v2** replaced v1's stored
+status with lifecycle-as-derived-query over two append-only logs; **v4** gave
+intent a shape (Initiative → Design → Epic → Milestone → Task) with human-only
+sealed approval; **IN** consolidated the surface under one name and grew the
+work MCP; **IS** made status and health stored speech acts, gave every noun a
+key grammar, and added the provenance pen. In this repo it was
+`internal/worklens` (the fold and its conformance oracle), `internal/workmcp`
+(45 tools), `internal/workbrief`, the `orun work` / `orun epic` /
+`orun initiatives` / `orun spec` CLI group and the cockpit's Work lane.
+
+- **Status:** Retired — deleted whole, never having met a user. A census
+  against Linear's 538-operation API put the differentiating core inside it —
+  evidence ingest, gate truth, provenance, the derived ladder, the seal — at
+  under 1,000 lines; the rest was a tracker competing with the one every team
+  already pays for.
+- **Retired by:**
+  [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+  — WT1 removed the orun-cloud half, WT3 dropped the `work` schema
+  (`1150_work_teardown_v2`), WT2 removed the orun half.
+- **What carries forward:** that epic's `carries-forward.md` — nineteen named
+  fold behaviours, the ownership boundary between what a tracker owns and what
+  we do, and four boundary rules for the successor. No replacement schema was
+  created; whoever builds it mints their own migrations.
+- **Code today:** three pieces outlived the plane and are standalone —
+  `internal/provenance` + `orun pr` (the pen the cloud's `orun/compliance`
+  check verifies), `internal/contract` (the agent brief's task contract and
+  its seal), and `internal/penmcp` (`pr_open`). `internal/approval` and
+  `internal/execseal` were never work-coupled.
 
 ## The state-model arc (for context)
 

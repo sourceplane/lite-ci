@@ -73,6 +73,11 @@ func runMcpDoctor(cmd *cobra.Command, backendURLFlag, workspaceFlag string) erro
 	// (a) binary capability + stale-PATH detection.
 	execPath, checks := doctorBinaryChecks()
 
+	// (a2) the pen plane's precondition, checked before anything cloud: it
+	// needs a repository, not a credential (orun-work-teardown WT2), so it
+	// is the one plane that can still mount on a fully degraded serve.
+	checks = append(checks, doctorPen(ctx))
+
 	backendURL, berr := requireBackendURL(loadIntentForCloudConfig(), backendURLFlag)
 	var ws string
 	var wsCheck doctorCheck
@@ -83,7 +88,6 @@ func runMcpDoctor(cmd *cobra.Command, backendURLFlag, workspaceFlag string) erro
 			doctorCheck{name: "auth", line: berr.Error()},
 			doctorCheck{name: "workspace", line: "skipped — no backend URL resolved"},
 			doctorCheck{name: "platform API", line: "skipped — no backend URL resolved"},
-			doctorCheck{name: "work API", line: "skipped — no backend URL resolved"},
 		)
 	} else {
 		// (c) resolved first because the OIDC exchange claims the org, but
@@ -94,15 +98,14 @@ func runMcpDoctor(cmd *cobra.Command, backendURLFlag, workspaceFlag string) erro
 		tokenSrc, authCheck := doctorAuth(ctx, backendURL, ws)
 		checks = append(checks, authCheck, wsCheck)
 
-		// (d) backend sanity: one platform route, one work route.
+		// (d) backend sanity: one platform route.
 		if tokenSrc == nil {
 			checks = append(checks,
 				doctorCheck{name: "platform API", line: "skipped — auth did not resolve"},
-				doctorCheck{name: "work API", line: "skipped — auth did not resolve"},
 			)
 		} else {
 			client := remotestate.NewClientWithScope(backendURL, version, tokenSrc, remotestate.Scope{OrgID: ws})
-			checks = append(checks, doctorBackendProbes(ctx, client, backendURL, ws)...)
+			checks = append(checks, doctorBackendProbes(ctx, client, backendURL)...)
 		}
 	}
 
@@ -225,6 +228,18 @@ func describeSessionAuth(creds *cliauth.Credentials, now time.Time) (bool, strin
 	return state == "ok", detail
 }
 
+// doctorPen reports the pen plane's mount: a repository checkout in the
+// cwd. No workspace is a warning, not a failure — serve degrades to the
+// platform plane and says so.
+func doctorPen(ctx context.Context) doctorCheck {
+	gitDir, err := gitOut(ctx, "rev-parse", "--git-dir")
+	if err != nil || gitDir == "" {
+		return doctorCheck{name: "pen", ok: true, warn: true,
+			line: "no repository checkout here — `pr_open` will not mount; run the serve from inside the repo you want PRs opened against"}
+	}
+	return doctorCheck{name: "pen", ok: true, line: "repository checkout at " + gitDir + " — `pr_open` mounts"}
+}
+
 // doctorWorkspace resolves the workspace exactly like `mcp serve`
 // (--workspace > ORUN_WORKSPACE/ORUN_ORG > intent.yaml execution.state >
 // the cached repo link > `orun workspace use`) and names the rung that
@@ -240,7 +255,7 @@ func doctorWorkspace(backendURL, flagWS string) (string, doctorCheck) {
 	ws, source := resolveDoctorWorkspace(flagWS, envWS, intentOrg, linkOrg)
 	if ws == "" {
 		return "", doctorCheck{name: "workspace", ok: true, warn: true,
-			line: "none resolved (checked " + workspaceResolutionOrder + ") — serve mounts platform tools only; select one with `orun workspace use <ws>` (or pass --workspace) to mount work tools"}
+			line: "none resolved (checked " + workspaceResolutionOrder + ") — platform tools still mount and take an explicit workspace argument; select one with `orun workspace use <ws>` (or pass --workspace) to have it filled in for you"}
 	}
 	return ws, doctorCheck{name: "workspace", ok: true, line: fmt.Sprintf("%s (from %s)", ws, source)}
 }
@@ -263,19 +278,12 @@ func resolveDoctorWorkspace(flagWS, envWS, intentWS, linkWS string) (value, sour
 }
 
 // doctorBackendProbes GETs one platform route (/v1/auth/profile — every
-// Orun Cloud api-edge serves it) and, when a workspace resolved, one work
-// route, with the resolved credential, and classifies each plane's answer.
-func doctorBackendProbes(ctx context.Context, client *remotestate.Client, backendURL, ws string) []doctorCheck {
+// Orun Cloud api-edge serves it) with the resolved credential and
+// classifies the answer. Since WT2 the platform plane is the serve's only
+// cloud-backed plane; the pen is reported by doctorPen.
+func doctorBackendProbes(ctx context.Context, client *remotestate.Client, backendURL string) []doctorCheck {
 	_, perr := client.GetAuthProfile(ctx)
-	checks := []doctorCheck{classifyDoctorProbe("platform API", "GET "+backendURL+"/v1/auth/profile", perr, true)}
-	if ws == "" {
-		checks = append(checks, doctorCheck{name: "work API", ok: true, warn: true,
-			line: "skipped — no workspace resolved (work tools would not mount)"})
-		return checks
-	}
-	_, werr := client.GetWorkSummary(ctx)
-	checks = append(checks, classifyDoctorProbe("work API", "GET work summary (workspace "+ws+")", werr, false))
-	return checks
+	return []doctorCheck{classifyDoctorProbe("platform API", "GET "+backendURL+"/v1/auth/profile", perr, true)}
 }
 
 // classifyDoctorProbe turns one probe result into a row. platformRoute

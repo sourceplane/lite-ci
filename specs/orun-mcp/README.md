@@ -1,5 +1,14 @@
 # Spec: orun-mcp — one binary, one MCP
 
+> **Post-teardown note.** This spec is an as-built record and names the work
+> plane as a dependency. That plane was retired whole by
+> [`orun-work-teardown`](https://github.com/sourceplane/orun-cloud/tree/main/specs/epics/orun-work-teardown)
+> (WT2 in this repo): `internal/worklens`, `internal/workmcp`,
+> `internal/workbrief`, the `orun work` / `orun epic` / `orun initiatives` /
+> `orun spec` CLI group and the cockpit's Work lane are gone, and its specs
+> are in [`specs/archive/`](../archive/). The MCP composes the pen plane (`internal/penmcp` — `pr_open`) and the
+> platform plane; the vendored manifest is 27 tools.
+
 **Unify the ecosystem's local MCP surface in the orun binary.** Today the
 binary serves the **work MCP** (`orun mcp serve` — `internal/workmcp`, 9
 tools over the work plane), while the **platform MCP** (25 tools over the

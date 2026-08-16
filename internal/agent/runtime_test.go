@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/agent/driver"
+	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/worklens"
 )
 
 func TestBriefDeterministicAndSealed(t *testing.T) {
@@ -16,7 +16,7 @@ func TestBriefDeterministicAndSealed(t *testing.T) {
 		RunKind:  nodes.RunKindImplementation,
 		Task:     "ORN-142",
 		Persona:  []byte("# Implementer\n\npersona\n"),
-		Contract: &worklens.Contract{Goal: "sweep leases", Affects: []string{"a/b/c"}, DoneWhen: []string{"green"}, Gates: []string{"parity"}},
+		Contract: &contract.Contract{Goal: "sweep leases", Affects: []string{"a/b/c"}, DoneWhen: []string{"green"}, Gates: []string{"parity"}},
 		Affected: []string{"a/b/c", "a/b/d"},
 	}
 	a1, err := AssembleBrief(ctx, objectstore.NewMemStore(objectstore.AlgoSHA256), in)
@@ -108,7 +108,7 @@ func TestRunLoopDeniedAndAskTools(t *testing.T) {
 		SessionID: "as_test2",
 		Driver:    &driver.Stub{Script: script},
 		Brief:     brief,
-		Policy:    NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_get"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
+		Policy:    NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"connection_info"}, Ask: []string{"webhook_create"}, Deny: []string{"*"}}),
 		Approve: func(driver.Event) driver.Verdict {
 			approvals++
 			return driver.Verdict{Approved: true, Reason: "ok"}
@@ -158,8 +158,8 @@ func TestRunLoopApprovalPolicyAutoResolve(t *testing.T) {
 
 	script := []driver.Event{
 		{Kind: driver.EventApproval, RequestID: "d1", Fields: map[string]any{"tool": "rm_rf", "requestId": "d1"}},
-		{Kind: driver.EventApproval, RequestID: "a1", Fields: map[string]any{"tool": "mcp__orun__work_get", "requestId": "a1"}},
-		{Kind: driver.EventApproval, RequestID: "q1", Fields: map[string]any{"tool": "contract_propose", "requestId": "q1"}},
+		{Kind: driver.EventApproval, RequestID: "a1", Fields: map[string]any{"tool": "mcp__orun__connection_info", "requestId": "a1"}},
+		{Kind: driver.EventApproval, RequestID: "q1", Fields: map[string]any{"tool": "webhook_create", "requestId": "q1"}},
 		{Kind: driver.EventDone, Fields: map[string]any{"status": "completed"}},
 	}
 	headConsulted := 0
@@ -167,10 +167,10 @@ func TestRunLoopApprovalPolicyAutoResolve(t *testing.T) {
 		SessionID: "as_test3",
 		Driver:    &driver.Stub{Script: script},
 		Brief:     brief,
-		Policy:    NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_get"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}}),
+		Policy:    NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"connection_info"}, Ask: []string{"webhook_create"}, Deny: []string{"*"}}),
 		Approve: func(e driver.Event) driver.Verdict {
 			headConsulted++
-			if e.Fields["tool"] != "contract_propose" {
+			if e.Fields["tool"] != "webhook_create" {
 				t.Errorf("head consulted for %v — policy should have auto-resolved it", e.Fields["tool"])
 			}
 			return driver.Verdict{RequestID: e.RequestID, Approved: true, Reason: "lgtm"}
@@ -204,11 +204,11 @@ func TestRunLoopApprovalPolicyAutoResolve(t *testing.T) {
 }
 
 func TestToolPolicyPrecedence(t *testing.T) {
-	p := NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"work_get", "catalog_*"}, Ask: []string{"contract_propose"}, Deny: []string{"*"}})
+	p := NewToolPolicy(nodes.AgentToolPolicy{Allow: []string{"connection_info", "catalog_*"}, Ask: []string{"webhook_create"}, Deny: []string{"*"}})
 	cases := map[string]Decision{
-		"work_get":         DecisionAllow, // exact allow beats wildcard deny
+		"connection_info":         DecisionAllow, // exact allow beats wildcard deny
 		"catalog_affected": DecisionAllow, // wildcard allow beats wildcard deny
-		"contract_propose": DecisionAsk,   // exact ask
+		"webhook_create": DecisionAsk,   // exact ask
 		"rm_rf":            DecisionDeny,  // only matches deny *
 	}
 	for tool, want := range cases {

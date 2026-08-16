@@ -110,9 +110,6 @@ const sidebars = {
         'cli/orun-secrets',
         'cli/orun-integrations',
         'cli/orun-policy',
-        'cli/orun-initiatives',
-        'cli/orun-spec',
-        'cli/orun-epic',
         'cli/orun-mcp',
       ],
     },
@@ -177,7 +174,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Release notes',
-      items: ['release-notes/v2.52.0', 'release-notes/v2.35.0', 'release-notes/v2.34.0', 'release-notes/v2.32.0', 'release-notes/v2.26.0',
+      items: ['release-notes/v2.54.0', 'release-notes/v2.52.0', 'release-notes/v2.35.0', 'release-notes/v2.34.0', 'release-notes/v2.32.0', 'release-notes/v2.26.0',
         'release-notes/v2.25.0', 'release-notes/v2.24.0', 'release-notes/v2.22.0', 'release-notes/v2.20.0', 'release-notes/v2.19.0', 'release-notes/v2.18.0', 'release-notes/v2.17.0', 'release-notes/v2.16.0', 'release-notes/v2.15.0', 'release-notes/v2.14.0', 'release-notes/v2.13.0', 'release-notes/v2.10.0', 'release-notes/v2.9.0', 'release-notes/v2.8.0', 'release-notes/v2.7.0', 'release-notes/v2.6.0'],
     },
     {

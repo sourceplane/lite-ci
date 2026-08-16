@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/worklens"
 )
 
 // BriefInput is the resolved material a brief is assembled from. The runtime
-// (or the CLI) gathers it — a pulled SpecSnapshot, the task contract, the
-// affected set, the agent type's persona — and the assembler renders +
-// seals a content-addressed nodes.AgentBrief plus the driver-facing prompt.
+// (or the CLI) gathers it — a sealed brief, the task contract, the affected
+// set, the agent type's persona — and the assembler renders + seals a
+// content-addressed nodes.AgentBrief plus the driver-facing prompt.
 type BriefInput struct {
 	RunKind   string // nodes.RunKind*
 	Task      string // task key (implementation/fix); empty for design
 	Persona   []byte // the agent type's persona body
 	Literacy  []byte // base literacy (defaults to the binary's when nil)
-	Contract  *worklens.Contract
-	SpecID    string // sealed SpecSnapshot id, when known
+	Contract  *contract.Contract
+	SpecID    string // sealed brief id, when known
 	CatalogID string // CatalogSnapshot the affects resolved against
 	// Affected is the frozen blast radius (component keys). Rendered into the
 	// instructions and sealed as an AffectedSet blob.

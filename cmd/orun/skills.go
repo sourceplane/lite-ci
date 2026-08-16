@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -46,7 +47,7 @@ func newSkillsListCommand() *cobra.Command {
 		Short: "Every skill's latest revision: name, rev, source",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -69,7 +70,7 @@ func newSkillsListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -93,7 +94,7 @@ the revision it is.`,
 			if rev != "" && len(args) == 0 {
 				return fmt.Errorf("orun skills pull: --rev needs a skill name")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -126,7 +127,7 @@ the revision it is.`,
 	}
 	cmd.Flags().StringVar(&rev, "rev", "", "exact revision sha256:<hex> (single-name pulls)")
 	cmd.Flags().StringVar(&dir, "dir", filepath.Join(".claude", "skills"), "target directory for skill files")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -153,7 +154,7 @@ func fetchAllSkills(ctx context.Context, client *remotestate.Client, org string)
 // miss (not linked, not logged in, offline) is a WARNING, never a failed
 // session: the skills sharpen a run; their absence doesn't brick it.
 func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir string, errOut io.Writer) {
-	client, err := workClient(ctx, backendURL, workspace)
+	client, err := cloudClient(ctx, backendURL, workspace)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
 		return
@@ -173,4 +174,15 @@ func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdi
 		fmt.Fprintf(errOut, "orun agent: skill pins not recorded (%v)\n", err)
 	}
 	fmt.Fprintf(errOut, "orun agent: %d skill(s) materialized into %s (pins recorded for the manifest)\n", len(pins), skillsDir)
+}
+
+// shortRevision shortens a sha256:<hex> content address to its familiar
+// 8-hex form. It moved here at the work-plane teardown (WT2) from the CLI
+// group that used to define it; skills are content-addressed the same way.
+func shortRevision(rev string) string {
+	r := strings.TrimPrefix(rev, "sha256:")
+	if len(r) > 8 {
+		r = r[:8]
+	}
+	return r
 }

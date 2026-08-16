@@ -19,7 +19,6 @@ import (
 	"github.com/sourceplane/orun/internal/tui2/surfaces/catalog"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/events"
 	"github.com/sourceplane/orun/internal/tui2/surfaces/home"
-	"github.com/sourceplane/orun/internal/tui2/surfaces/work"
 )
 
 // Options locates the workspace the cockpit reads.
@@ -39,7 +38,7 @@ type Options struct {
 }
 
 // NewProgram builds the cockpit v2 program: the real surfaces as they land
-// (Home/Events TR7, Work TR6, Agents TR3, Activity TR4, Catalog TR5) plus
+// (Home/Events TR7, Agents TR3, Activity TR4, Catalog TR5) plus
 // the design-system gallery.
 func NewProgram(opts Options) *tea.Program {
 	var src data.Source
@@ -63,7 +62,6 @@ func NewProgram(opts Options) *tea.Program {
 
 	surfaces := []shell.Surface{
 		home.New(src),
-		work.New(src),
 		agents.New(src),
 		activity.New(src),
 		catalog.New(src, comp),

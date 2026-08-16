@@ -9,7 +9,7 @@ import (
 func degradedInfo() ConnectionInfo {
 	return ConnectionInfo{
 		AuthState:  "absent",
-		Work:       PlaneMount{Mounted: false, Reason: "auth did not resolve — not logged in to Orun Cloud; run `orun auth login`"},
+		Pen:        PlaneMount{Mounted: false, Reason: "no repository checkout here — run the serve from inside the repo"},
 		Platform:   PlaneMount{Mounted: false, Reason: "auth did not resolve — not logged in to Orun Cloud; run `orun auth login`"},
 		Fix:        "run `orun auth login`",
 		BackendURL: "",
@@ -108,10 +108,16 @@ func TestDegradedServeHandshake(t *testing.T) {
 	if out.BackendURL != nil {
 		t.Errorf("backendUrl must be null when unresolved, got %v", *out.BackendURL)
 	}
-	for _, plane := range []string{"work", "platform"} {
+	// Each plane names its own precondition: the platform plane needs a
+	// credential, the pen needs a checkout (WT2 — the pen stopped riding
+	// on cloud auth when the work plane it mounted with was deleted).
+	for plane, wantFragment := range map[string]string{
+		"pen":      "repository checkout",
+		"platform": "orun auth login",
+	} {
 		p, ok := out.Planes[plane]
-		if !ok || p.State != "skipped" || !strings.Contains(p.Reason, "orun auth login") {
-			t.Errorf("plane %s = %+v, want skipped with an actionable reason", plane, p)
+		if !ok || p.State != "skipped" || !strings.Contains(p.Reason, wantFragment) {
+			t.Errorf("plane %s = %+v, want skipped naming %q", plane, p, wantFragment)
 		}
 	}
 	if out.Fix != "run `orun auth login`" {
@@ -130,7 +136,7 @@ func TestConnectionInfoAllOk(t *testing.T) {
 		AuthSource: "session",
 		ExpiresAt:  "2026-07-12T15:04:05Z",
 		BackendURL: "https://api.orun.cloud",
-		Work:       PlaneMount{Mounted: true, Reason: "workspace ws_1 (from --workspace)"},
+		Pen:        PlaneMount{Mounted: true, Reason: "repository checkout at .git"},
 		Platform:   PlaneMount{Mounted: true, Reason: "auth resolved (session)"},
 	}}
 	result, owned := p.Call(t.Context(), ConnectionInfoToolName, nil)
@@ -153,7 +159,7 @@ func TestConnectionInfoAllOk(t *testing.T) {
 		t.Errorf("backendUrl = %v", out["backendUrl"])
 	}
 	planes := out["planes"].(map[string]interface{})
-	for _, plane := range []string{"work", "platform"} {
+	for _, plane := range []string{"pen", "platform"} {
 		if planes[plane].(map[string]interface{})["state"] != "mounted" {
 			t.Errorf("plane %s = %v, want mounted", plane, planes[plane])
 		}

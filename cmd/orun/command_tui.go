@@ -61,7 +61,7 @@ var tuiNextCmd = &cobra.Command{
 	Use:   "tui-next",
 	Short: "Open the next-generation Orun Cockpit (preview)",
 	Long: "Launch the cockpit v2 (specs/orun-tui-v2): the terminal head of orun " +
-		"cloud — Home, Work, Agents, Activity, Catalog, and Events over the same " +
+		"cloud — Home, Agents, Activity, Catalog, and Events over the same " +
 		"state store, stream-driven and frame-stable. Preview: it becomes the " +
 		"default `orun tui` after the cloud lanes land and a release soaks.",
 	RunE: func(cmd *cobra.Command, args []string) error {

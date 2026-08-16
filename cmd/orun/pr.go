@@ -13,26 +13,30 @@ import (
 
 	"github.com/sourceplane/orun/internal/cliauth"
 	"github.com/sourceplane/orun/internal/provenance"
-	"github.com/sourceplane/orun/internal/remotestate"
 )
 
-// orun pr (orun-initiatives-v2 IS6, design §9) — the provenance pen: the
-// branch names the task, the body carries the machine-readable manifest,
-// commits carry the Orun-Task trailer, and the cloud's orun/compliance
-// check (IS7) verifies what the pen wrote. `orun pr check` is the local
-// preflight of the same rules — prevention over detection.
+// orun pr — the provenance pen: the branch names the task, the body
+// carries the machine-readable manifest, commits carry the Orun-Task
+// trailer, and the cloud's orun/compliance check verifies what the pen
+// wrote. `orun pr check` is the local preflight of the same rules —
+// prevention over detection.
+//
+// The pen is repo-local by construction: it reads git and writes GitHub.
+// The work plane it was born beside is gone (orun-work-teardown WT2), and
+// with it the two gestures that spoke to it — `--quick`, which minted a
+// triage task inline, and `pr link`, which commented a URL onto a task's
+// coordination log. Everything the compliance check verifies is here.
 
 func registerPrCommand(root *cobra.Command) {
 	cmd := &cobra.Command{
 		Use:   "pr",
-		Short: "The provenance pen: open, preflight, and link task-carrying PRs",
+		Short: "The provenance pen: open and preflight task-carrying PRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(newPrOpenCommand())
 	cmd.AddCommand(newPrCheckCommand())
-	cmd.AddCommand(newPrLinkCommand())
 	root.AddCommand(cmd)
 
 	hooks := &cobra.Command{
@@ -64,15 +68,12 @@ func loadSessionSkillPins() []provenance.SkillPin {
 
 func newPrOpenCommand() *cobra.Command {
 	var (
-		workspace  string
-		backendURL string
-		asJSON     bool
-		task       string
-		quick      string
-		title      string
-		base       string
-		draft      bool
-		session    string
+		asJSON  bool
+		task    string
+		title   string
+		base    string
+		draft   bool
+		session string
 	)
 	cmd := &cobra.Command{
 		Use:   "open",
@@ -82,35 +83,17 @@ func newPrOpenCommand() *cobra.Command {
 manifest block written into the body — the task, the skill revisions the
 session ran under, and the session id.
 
---quick "title" mints a WRK triage task inline first — discovered work
-gets a key before it gets a PR.
-
 With a GitHub credential ambient (GITHUB_TOKEN / GH_TOKEN / gh auth) the
 PR opens via the API; without one the pen still prepares everything and
 prints the compare URL plus the body to paste — honest either way.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			if (task == "") == (quick == "") {
-				return fmt.Errorf("orun pr open: exactly one of --task or --quick")
+			if task == "" {
+				return fmt.Errorf("orun pr open: --task is required — a PR opens FOR a task")
 			}
 			manifest := provenance.Manifest{Version: provenance.ManifestVersion,
 				Skills: loadSessionSkillPins(), Session: session}
-			if quick != "" {
-				client, err := workClient(ctx, backendURL, workspace)
-				if err != nil {
-					return err
-				}
-				minted, err := client.CreateWorkTask(ctx, remotestate.CreateWorkTaskRequest{Prefix: "WRK", Title: quick})
-				if err != nil {
-					return fmt.Errorf("orun pr open --quick: %w", err)
-				}
-				task = minted.Key
-				if title == "" {
-					title = quick
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "minted triage task %s\n", task)
-			}
 			pen := &provenance.Pen{Workdir: ".", Token: cliauth.GitHubTokenFromEnv}
 			out, err := pen.Open(ctx, provenance.OpenRequest{
 				TaskKey: task, Title: title, Base: base, Draft: draft, Manifest: manifest,
@@ -133,12 +116,11 @@ prints the compare URL plus the body to paste — honest either way.`,
 		},
 	}
 	cmd.Flags().StringVar(&task, "task", "", "the task this PR closes (one task, one PR)")
-	cmd.Flags().StringVar(&quick, "quick", "", "mint a WRK triage task inline with this title")
 	cmd.Flags().StringVar(&title, "title", "", "PR title (default: the task key)")
 	cmd.Flags().StringVar(&base, "base", "main", "base branch")
 	cmd.Flags().BoolVar(&draft, "draft", false, "open as a draft")
 	cmd.Flags().StringVar(&session, "session", os.Getenv("ORUN_SESSION"), "session id for the manifest")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd
 }
 
@@ -189,44 +171,6 @@ Fix the lineage before the PR exists — prevention over detection.`,
 	}
 	cmd.Flags().StringVar(&base, "base", "main", "base branch to diff against")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
-	return cmd
-}
-
-func newPrLinkCommand() *cobra.Command {
-	var (
-		workspace  string
-		backendURL string
-		asJSON     bool
-		url        string
-	)
-	cmd := &cobra.Command{
-		Use:   "link <task-key>",
-		Short: "Cross-reference an existing PR on its task",
-		Long: `Comment the PR's URL onto the task's coordination log. The observation
-log does the real evidence linking when the webhook sees the branch/PR;
-this is the human-visible cross-reference for PRs opened outside the pen.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(url) == "" {
-				return fmt.Errorf("orun pr link: --url is required")
-			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
-			if err != nil {
-				return err
-			}
-			out, err := client.CommentWork(cmd.Context(), args[0], "PR linked: "+url)
-			if err != nil {
-				return fmt.Errorf("orun pr link: %w", err)
-			}
-			if asJSON {
-				return encodeJSON(cmd, out)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "linked %s on %s (seq %d)\n", url, out.Key, out.Seq)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&url, "url", "", "the PR URL to link (required)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 

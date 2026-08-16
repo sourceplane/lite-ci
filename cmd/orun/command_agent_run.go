@@ -17,9 +17,9 @@ import (
 	"github.com/sourceplane/orun/internal/agent/driver"
 	"github.com/sourceplane/orun/internal/agent/live"
 	"github.com/sourceplane/orun/internal/agenttype"
+	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
-	"github.com/sourceplane/orun/internal/worklens"
-	"github.com/sourceplane/orun/internal/workmcp"
+	"github.com/sourceplane/orun/internal/penmcp"
 	"github.com/spf13/cobra"
 )
 
@@ -51,8 +51,9 @@ persona + the task contract + the frozen affected set) and run it through the
 chosen driver, streaming the driver's events into an append-only session log.
 
 --dry-run seals and prints the brief without launching — the reviewable "here
-is exactly what the agent will see". The contract is read from a pulled spec
-snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
+is exactly what the agent will see". The contract is read from the sealed
+brief at .orun/specs/<slug>/snapshot.json; the brief's content id is computed
+over the bytes on disk and recorded on the run.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		store, refs, _, ok := openObjectStores()
@@ -78,24 +79,21 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 			typeModel = d.Model
 		}
 
-		// Resolve the contract from a pulled spec snapshot, if present.
-		var contract *worklens.Contract
+		// Resolve the contract from the sealed brief, if one is named.
+		var taskContract *contract.Contract
 		var specID string
 		if runSpecSlug != "" {
-			snap, err := readPulledSnapshot(runSpecSlug)
+			brief, id, err := readSealedBrief(runSpecSlug)
 			if err != nil {
 				return err
 			}
-			specID = snapshotID(snap)
+			specID = id
 			if runTask != "" {
-				for i := range snap.Tasks {
-					if snap.Tasks[i].Key == runTask {
-						contract = snap.Tasks[i].Contract
-					}
+				t, ok := brief.Task(runTask)
+				if !ok || t.Contract == nil {
+					return fmt.Errorf("task %q carries no contract in brief %q", runTask, runSpecSlug)
 				}
-				if contract == nil {
-					return fmt.Errorf("task %q not in spec %q", runTask, runSpecSlug)
-				}
+				taskContract = t.Contract
 			}
 		}
 
@@ -104,15 +102,15 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 			runKind = nodes.RunKindInteractive
 		}
 		var affected []string
-		if contract != nil {
-			affected = contract.Affects
+		if taskContract != nil {
+			affected = taskContract.Affects
 		}
 
 		brief, err := agent.AssembleBrief(ctx, store, agent.BriefInput{
 			RunKind:  runKind,
 			Task:     runTask,
 			Persona:  persona,
-			Contract: contract,
+			Contract: taskContract,
 			SpecID:   specID,
 			Affected: affected,
 		})
@@ -152,7 +150,7 @@ snapshot under .orun/specs/<slug>/ (see 'orun spec pull').`,
 		var mcpConfigPath string
 		if runDriver == driver.ClaudeCodeID {
 			setup, mErr := agent.WriteMCPConfig(filepath.Join(".orun", "agent-mcp"),
-				agent.NewToolPolicy(toolPolicy), workmcp.ToolNames(), nil)
+				agent.NewToolPolicy(toolPolicy), penmcp.ToolNames(), nil)
 			if mErr != nil {
 				return mErr
 			}
@@ -292,32 +290,26 @@ func newSessionID() string {
 	return "as_" + hex.EncodeToString(b[:])
 }
 
-func readPulledSnapshot(slug string) (*worklens.SpecSnapshot, error) {
+// readSealedBrief loads the sealed brief a run is dispatched against and
+// returns it with its content id. The id is computed over the bytes on
+// disk, so the brief the agent is briefed with is exactly the brief the
+// run records — whoever wrote the file.
+func readSealedBrief(slug string) (*contract.Brief, string, error) {
 	p := filepath.Join(".orun", "specs", slug, "snapshot.json")
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil, fmt.Errorf("no pulled spec %q (run `orun spec pull %s`): %w", slug, slug, err)
+		return nil, "", fmt.Errorf("no sealed brief %q at %s: %w", slug, p, err)
 	}
-	var snap worklens.SpecSnapshot
-	if err := json.Unmarshal(b, &snap); err != nil {
-		return nil, fmt.Errorf("spec %q snapshot: %w", slug, err)
+	brief, id, err := contract.DecodeBrief(b)
+	if err != nil {
+		return nil, "", fmt.Errorf("brief %q: %w", slug, err)
 	}
-	return &snap, nil
-}
-
-func snapshotID(snap *worklens.SpecSnapshot) string {
-	if snap == nil {
-		return ""
-	}
-	if id, _, err := worklens.SealSpecSnapshot(*snap); err == nil {
-		return id
-	}
-	return ""
+	return brief, id, nil
 }
 
 func registerAgentRunCommand(parent *cobra.Command) {
 	agentRunCmd.Flags().StringVar(&runTask, "task", "", "task key to implement (e.g. ORN-142)")
-	agentRunCmd.Flags().StringVar(&runSpecSlug, "spec", "", "pulled spec slug supplying the task contract")
+	agentRunCmd.Flags().StringVar(&runSpecSlug, "spec", "", "sealed brief slug under .orun/specs/ supplying the task contract")
 	agentRunCmd.Flags().StringVar(&runType, "type", "", "agent type (agents/<type>.md) — persona + tool policy")
 	agentRunCmd.Flags().StringVar(&runDriver, "driver", "stub", "driver id (see `orun agent drivers`)")
 	agentRunCmd.Flags().BoolVar(&agentRunDryRun, "dry-run", false, "seal and print the brief without launching")
@@ -355,7 +347,7 @@ brief's tool policy filters.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "drivers    %v\n", driver.IDs())
-			fmt.Fprintf(out, "mcp tools  %d (orun mcp serve)\n", len(workmcp.ToolNames()))
+			fmt.Fprintf(out, "mcp tools  %d (orun mcp serve)\n", countMcpRoster().total())
 			path, err := exec.LookPath("claude")
 			if err != nil {
 				fmt.Fprintln(out, "claude     not found on PATH — `--driver claude-code` needs the Claude Code CLI")

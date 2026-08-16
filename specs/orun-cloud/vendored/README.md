@@ -17,28 +17,30 @@ Neither repo may break a contract unilaterally (see
 `internal/platformmcp/` for `go:embed`; `TestEmbeddedManifestMatchesVendored`
 and `TestVendoredManifestChecksum` (internal/platformmcp/parity_test.go) pin
 the copy and the CHECKSUM entry. Re-vendor procedure: copy the new export
-here AND into `internal/platformmcp/`, update `CHECKSUM`, reconcile
-`cededToWorkPlane` (below), run the parity tests.
+here AND into `internal/platformmcp/`, update `CHECKSUM`, check for a name a
+local plane already serves (below), run the parity tests.
 
-### Tools this repo cedes to the work plane
+### The plane advertises the whole manifest
 
-The manifest is the TS plane's whole roster, and the TS plane serves some
-tools this repo already serves natively. `internal/platformmcp` therefore
-advertises a **subset**: `cededToWorkPlane` (internal/platformmcp/manifest.go)
-lists the names `internal/workmcp` owns, and the platform provider drops
-them from `tools/list` and disowns them at dispatch.
+Until the work-plane teardown (`orun-work-teardown` WT2) this repo served a
+native work MCP, and `internal/platformmcp` advertised a **subset** of the
+manifest: a `cededToWorkPlane` set named four tools — `initiatives_list`,
+`initiative_tree`, `task_get`, `activity_get` — that both planes served, and
+the platform provider dropped them from `tools/list` and disowned them at
+dispatch. `mcpserve.checkRoster` rejects a roster carrying one name twice, so
+without the filter `orun mcp serve` failed at startup once both planes
+mounted.
 
-As of the 29-tool manifest that is four work-plane reads — `initiatives_list`,
-`initiative_tree`, `task_get`, `activity_get` — leaving 25 advertised
-(19 reads + 6 writes), which is why the platform-plane counts in
-`specs/orun-mcp` and the website docs did not move when the manifest grew.
+The work plane is gone from both repos, and the TS export dropped the same
+four names (31 → 27), so the subset and the whole are now one roster and the
+ceding machinery is deleted. `TestNoWorkPlaneNamesSurvive`
+(internal/platformmcp/parity_test.go) guards the direction that still
+matters: those four names must not return to the manifest, because no local
+plane implements them and advertising one would promise a tool the provider
+cannot answer.
 
-This is not optional bookkeeping: `mcpserve.checkRoster` rejects a roster
-carrying one name twice, so an unceded duplicate makes `orun mcp serve` fail
-at startup as soon as both planes mount. **Every re-vendor must ask whether
-the new export added a name `internal/workmcp` already serves.**
-`TestCededNamesResolveInTheManifest` catches the opposite drift — a ceded
-name the manifest no longer carries.
+**A re-vendor must still ask whether the new export added a name a local
+plane already serves** — today that is `internal/penmcp`'s `pr_open`.
 
 ## Drift guard
 
@@ -95,9 +97,9 @@ Same shape, one extra step:
        sha256sum specs/orun-cloud/vendored/mcp-tool-manifest.json
        # paste "<sha256>  mcp-tool-manifest.json" into CHECKSUM
 
-3. **Reconcile `cededToWorkPlane`.** Diff the new tool names against
-   `workmcp.Tools()`; any name both planes serve must be ceded, or
-   `orun mcp serve` fails at startup on the duplicate.
+3. **Check for a duplicate name.** Diff the new tool names against the
+   local planes' rosters (`penmcp.Tools()`); a name both planes serve makes
+   `orun mcp serve` fail at startup on the duplicate.
 
 4. Update the roster counts asserted in `internal/platformmcp/parity_test.go`
    (manifest total and reads, advertised total and reads) and run

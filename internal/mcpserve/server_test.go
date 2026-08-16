@@ -238,7 +238,7 @@ func TestLineLimits(t *testing.T) {
 	}
 
 	// A line past the 16 MiB scanner cap surfaces the scanner error,
-	// exactly as the workmcp loop always did.
+	// exactly as the loop this transport came from always did.
 	over := `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"` + strings.Repeat("a", 16*1024*1024) + `"}}` + "\n"
 	err := s.Serve(context.Background(), strings.NewReader(over), &strings.Builder{})
 	if !errors.Is(err, bufio.ErrTooLong) {

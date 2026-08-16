@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/mcpserve"
+	"github.com/sourceplane/orun/internal/penmcp"
+	"github.com/sourceplane/orun/internal/provenance"
 	"github.com/sourceplane/orun/internal/remotestate"
-	"github.com/sourceplane/orun/internal/workmcp"
 )
 
 // fakeAPI records every seam call as "Method org=… …" and serves one canned
-// page (workmcp's fakeAPI convention). Write calls also record their
+// page. Write calls also record their
 // Idempotency-Key, in call order, into keys.
 type fakeAPI struct {
 	calls []string
@@ -374,7 +375,7 @@ func TestErrorMapping(t *testing.T) {
 	if text != "forbidden: missing member role (requestId: req_42)" {
 		t.Fatalf("error text = %q", text)
 	}
-	// A non-API error keeps the workmcp "error: …" shape.
+	// A non-API error keeps the "error: …" result shape.
 	p = granted(&Provider{API: &fakeAPI{err: fmt.Errorf("backend down")}}, "ws_1")
 	text, isErr = callTool(t, p, "audit_search", `{"workspace":"ws_1"}`)
 	if !isErr || text != "error: backend down" {
@@ -482,20 +483,20 @@ func TestConfigScopeValidation(t *testing.T) {
 	}
 }
 
-// TestComposedServer: 46 tools (21 work + 25 platform) under one initialize,
-// calls routed to the owning provider, and the WP-3/WP-10 forbidden-name
-// sweep green over the merged roster.
+// TestComposedServer: the pen and platform planes under one initialize,
+// calls routed to the owning provider, and the forbidden-name sweep green
+// over the merged roster.
 func TestComposedServer(t *testing.T) {
 	platformAPI := &fakeAPI{page: page(`{}`, "")}
-	work := &workmcp.Server{API: workFake{}, Workspace: "ws_1"}
+	pen := &penmcp.Provider{Pen: composePen{}}
 	platform := granted(&Provider{API: platformAPI, DefaultWorkspace: "ws_1"}, "ws_1")
-	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{work, platform}, Version: "test"}
+	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{pen, platform}, Version: "test"}
 
 	in := strings.NewReader(strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"work_query","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"pr_open","arguments":{"task":"PAY-T14"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"resources/templates/list"}`,
 		`{"jsonrpc":"2.0","id":6,"method":"prompts/get","params":{"name":"usage_review","arguments":{"workspace":"acme"}}}`,
 	}, "\n") + "\n")
@@ -541,9 +542,10 @@ func TestComposedServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	// 64 → 72 at WK4 (orun-work-spaces §2; see workmcp's roster pin).
-	if len(toolsResp.Result.Tools) != 72 {
-		t.Fatalf("merged roster = %d tools, want 72 (45 work + 27 platform — WK4)", len(toolsResp.Result.Tools))
+	// 72 → 28 at WT2: the 45-tool work plane is gone; the pen it carried
+	// stands on its own beside the platform roster.
+	if len(toolsResp.Result.Tools) != 28 {
+		t.Fatalf("merged roster = %d tools, want 28 (1 pen + 27 platform — WT2)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -564,7 +566,7 @@ func TestComposedServer(t *testing.T) {
 		t.Errorf("whoami not routed to the platform provider: %s", lines[2])
 	}
 	if strings.Contains(lines[3], "isError") {
-		t.Errorf("work_query not routed to the work provider: %s", lines[3])
+		t.Errorf("pr_open not routed to the pen provider: %s", lines[3])
 	}
 	if len(platformAPI.calls) == 0 {
 		t.Error("platform seam never called")
@@ -572,14 +574,15 @@ func TestComposedServer(t *testing.T) {
 }
 
 // TestComposedServerReadOnly: --read-only drops exactly the 6 platform
-// writes (64 → 58); the 37 work tools stay — they are mutator-shaped by
-// WP-6, not read-only-filtered (risk U-R3) — and a filtered write is
-// blocked at execution too, not just delisted.
+// writes; the pen stays — it writes by definition, and gating it on a flag
+// meant for read scoping would silently strip an agent's only way to open a
+// PR — and a filtered platform write is blocked at execution too, not just
+// delisted.
 func TestComposedServerReadOnly(t *testing.T) {
 	api := &fakeAPI{page: page(`{}`, "")}
-	work := &workmcp.Server{API: workFake{}, Workspace: "ws_1"}
+	pen := &penmcp.Provider{Pen: composePen{}}
 	platform := granted(&Provider{API: api, DefaultWorkspace: "ws_1", ReadOnly: true}, "ws_1")
-	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{work, platform}, Version: "test"}
+	srv := &mcpserve.Server{Providers: []mcpserve.ToolProvider{pen, platform}, Version: "test"}
 
 	in := strings.NewReader(strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
@@ -600,28 +603,21 @@ func TestComposedServerReadOnly(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &toolsResp); err != nil {
 		t.Fatal(err)
 	}
-	// 58 → 66 at WK4 (the work MCP mounts whole; its own tier model
-	// governs writes — read-only strips platform writes only).
-	if len(toolsResp.Result.Tools) != 66 {
-		t.Fatalf("read-only roster = %d tools, want 66 (45 work + 21 platform reads — WK4)", len(toolsResp.Result.Tools))
+	// 66 → 22 at WT2: 21 platform reads plus the pen.
+	if len(toolsResp.Result.Tools) != 22 {
+		t.Fatalf("read-only roster = %d tools, want 22 (1 pen + 21 platform reads — WT2)", len(toolsResp.Result.Tools))
 	}
-	workCount := 0
+	penCount := 0
 	for _, tool := range toolsResp.Result.Tools {
-		if strings.HasPrefix(tool.Name, "work_") || strings.HasPrefix(tool.Name, "spec_") ||
-			strings.HasPrefix(tool.Name, "task_") || strings.HasPrefix(tool.Name, "contract_") ||
-			strings.HasPrefix(tool.Name, "epic_") || strings.HasPrefix(tool.Name, "design_") ||
-			strings.HasPrefix(tool.Name, "milestone_") || strings.HasPrefix(tool.Name, "initiative_") ||
-			strings.HasPrefix(tool.Name, "initiatives_") || strings.HasPrefix(tool.Name, "activity_") ||
-			strings.HasPrefix(tool.Name, "item_") || strings.HasPrefix(tool.Name, "review_") ||
-			strings.HasPrefix(tool.Name, "pr_") || strings.HasPrefix(tool.Name, "space") {
-			workCount++
+		if tool.Name == penmcp.ToolName {
+			penCount++
 		}
 		if tool.Name == "project_create" {
 			t.Error("write tool advertised under --read-only")
 		}
 	}
-	if workCount != 45 {
-		t.Errorf("work tools under --read-only = %d, want 45 (mutator-shaped, unaffected — WK4 roster)", workCount)
+	if penCount != 1 {
+		t.Errorf("pen tools under --read-only = %d, want 1 (the pen writes by definition, unaffected)", penCount)
 	}
 	if !strings.Contains(lines[1], "isError") || !strings.Contains(lines[1], "read-only") {
 		t.Errorf("blocked write must be an isError read-only verdict: %s", lines[1])
@@ -631,146 +627,11 @@ func TestComposedServerReadOnly(t *testing.T) {
 	}
 }
 
-// workFake is a minimal workmcp.WorkAPI for the composition test.
-type workFake struct{}
+// composePen is a minimal penmcp.Pen for the composition test: it never
+// touches git, it only proves the call routed to the pen provider.
+type composePen struct{}
 
-func (workFake) GetWorkSummary(context.Context) (*remotestate.WorkSummary, error) {
-	return &remotestate.WorkSummary{}, nil
-}
-func (workFake) GetWorkTimeline(_ context.Context, key string) (*remotestate.WorkTimeline, error) {
-	return &remotestate.WorkTimeline{Key: key}, nil
-}
-func (workFake) GetWorkDoc(_ context.Context, specKey, _ string) (*remotestate.WorkDoc, error) {
-	return &remotestate.WorkDoc{SpecKey: specKey}, nil
-}
-func (workFake) CreateWorkTask(context.Context, remotestate.CreateWorkTaskRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{}, nil
-}
-func (workFake) CommentWork(context.Context, string, string) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{}, nil
-}
-func (workFake) AssignWork(context.Context, string, string, bool) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{}, nil
-}
-func (workFake) EditWorkContract(context.Context, string, remotestate.WorkContract) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{}, nil
-}
-func (workFake) GetEpicBrief(context.Context, string, string) (*remotestate.WorkEpicBrief, error) {
-	return &remotestate.WorkEpicBrief{}, nil
-}
-func (workFake) GetEpicMilestones(_ context.Context, epicKey string) (*remotestate.WorkMilestonesView, error) {
-	return &remotestate.WorkMilestonesView{Epic: epicKey}, nil
-}
-func (workFake) GetWorkDesign(_ context.Context, key string) (*remotestate.WorkDesignView, error) {
-	return &remotestate.WorkDesignView{Key: key}, nil
-}
-func (workFake) GetWorkRollups(_ context.Context, initiativeKey string) (*remotestate.WorkRollups, error) {
-	return &remotestate.WorkRollups{Initiative: initiativeKey}, nil
-}
-func (workFake) CreateWorkDesign(context.Context, string, remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{}, nil
-}
-func (workFake) RegenerateWorkTasks(context.Context, string, string, remotestate.RegenerateWorkTasksRequest) (*remotestate.RegenerateWorkTasksResponse, error) {
-	return &remotestate.RegenerateWorkTasksResponse{}, nil
-}
-func (workFake) ListInitiatives(context.Context) (*remotestate.WorkPortfolio, error) {
-	return &remotestate.WorkPortfolio{}, nil
-}
-func (workFake) GetInitiativeTree(_ context.Context, key string) (*remotestate.WorkInitiativeTree, error) {
-	tree := &remotestate.WorkInitiativeTree{}
-	tree.Initiative.Key = key
-	return tree, nil
-}
-func (workFake) GetTaskDetail(_ context.Context, key string) (*remotestate.WorkTaskDetail, error) {
-	return &remotestate.WorkTaskDetail{Task: remotestate.WorkTaskView{Key: key}}, nil
-}
-func (workFake) GetWorkActivity(context.Context, remotestate.WorkActivityOptions) (*remotestate.WorkActivity, error) {
-	return &remotestate.WorkActivity{}, nil
-}
-func (workFake) CreateInitiative(_ context.Context, req remotestate.CreateWorkInitiativeRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: req.Slug}, nil
-}
-func (workFake) UpsertMilestones(_ context.Context, epicKey string, _ remotestate.WorkMilestoneRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: epicKey}, nil
-}
-
-// orun-initiatives-v2 (IS4) — the grown WorkAPI legs, canned.
-func (workFake) GetWorkItem(_ context.Context, ref string) (*remotestate.WorkItemResolve, error) {
-	return &remotestate.WorkItemResolve{Key: ref, CanonicalKey: ref, Kind: "task"}, nil
-}
-func (workFake) GetWorkContext(_ context.Context, ref string, _ remotestate.WorkContextOptions) (*remotestate.WorkContext, error) {
-	return &remotestate.WorkContext{Item: remotestate.WorkContextItem{Key: ref, CanonicalKey: ref, Kind: "task"}}, nil
-}
-func (workFake) GetWorkNow(context.Context, remotestate.WorkNowOptions) (*remotestate.WorkNow, error) {
-	return &remotestate.WorkNow{}, nil
-}
-func (workFake) GetWorkYours(context.Context, remotestate.WorkYoursOptions) (*remotestate.WorkYours, error) {
-	return &remotestate.WorkYours{}, nil
-}
-func (workFake) ListInitiativeUpdates(context.Context, string) (*remotestate.WorkInitiativeUpdates, error) {
-	return &remotestate.WorkInitiativeUpdates{}, nil
-}
-func (workFake) SetInitiativeStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
-	return &remotestate.SetInitiativeStatusResponse{Key: key, Status: req.To}, nil
-}
-func (workFake) PostInitiativeUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostInitiativeUpdateResponse, error) {
-	return &remotestate.PostInitiativeUpdateResponse{Key: key, Update: remotestate.WorkInitiativeUpdateView{Health: req.Health}}, nil
-}
-func (workFake) AssertTaskDone(_ context.Context, key, _, _ string) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) PostTaskNote(_ context.Context, key string, _ remotestate.PostTaskNoteRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) AssignWorkItem(_ context.Context, key string, _ remotestate.AssignWorkItemRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) RequestWorkReview(_ context.Context, _, key string, _ remotestate.WorkReviewRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) SubmitWorkVerdict(_ context.Context, _, key string, _ remotestate.WorkVerdictRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) ApproveEpic(_ context.Context, key string, _ remotestate.ApproveEpicRequest) (*remotestate.ApproveEpicResponse, error) {
-	return &remotestate.ApproveEpicResponse{Key: key}, nil
-}
-func (workFake) RevokeEpicApproval(_ context.Context, key, _ string) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-func (workFake) AdoptDesign(_ context.Context, key string, _ remotestate.AdoptDesignRequest) (*remotestate.AdoptDesignResponse, error) {
-	return &remotestate.AdoptDesignResponse{Key: key}, nil
-}
-func (workFake) SupersedeDesign(_ context.Context, key string, _ remotestate.SupersedeDesignRequest) (*remotestate.WorkMutationResponse, error) {
-	return &remotestate.WorkMutationResponse{Key: key}, nil
-}
-
-// orun-work-spaces (WK1–WK4) — the Space names and the machine on the Epic.
-func (workFake) ListSpaces(context.Context, bool) (*remotestate.WorkSpaces, error) {
-	return &remotestate.WorkSpaces{}, nil
-}
-func (workFake) GetSpace(_ context.Context, prefix string) (*remotestate.WorkSpaceDetail, error) {
-	return &remotestate.WorkSpaceDetail{Space: remotestate.WorkSpaceView{Prefix: prefix}}, nil
-}
-func (workFake) CreateSpace(_ context.Context, req remotestate.CreateWorkSpaceRequest) (*remotestate.CreateWorkSpaceResponse, error) {
-	return &remotestate.CreateWorkSpaceResponse{Space: remotestate.WorkSpaceView{Prefix: req.Prefix, Title: req.Title}}, nil
-}
-func (workFake) PatchSpace(_ context.Context, prefix string, _ remotestate.PatchWorkSpaceRequest) (*remotestate.PatchSpaceResponse, error) {
-	return &remotestate.PatchSpaceResponse{Key: prefix, Space: remotestate.WorkSpaceView{Prefix: prefix}}, nil
-}
-func (workFake) ListEpics(context.Context, remotestate.WorkEpicsOptions) (*remotestate.WorkEpics, error) {
-	return &remotestate.WorkEpics{}, nil
-}
-func (workFake) SetEpicStatus(_ context.Context, key string, req remotestate.SetInitiativeStatusRequest) (*remotestate.SetInitiativeStatusResponse, error) {
-	return &remotestate.SetInitiativeStatusResponse{Key: key, Status: req.To}, nil
-}
-func (workFake) PostEpicUpdate(_ context.Context, key string, req remotestate.PostInitiativeUpdateRequest) (*remotestate.PostEpicUpdateResponse, error) {
-	return &remotestate.PostEpicUpdateResponse{Key: key, Update: remotestate.WorkEpicUpdateView{Epic: key, Health: req.Health}}, nil
-}
-func (workFake) ListEpicUpdates(_ context.Context, key string) (*remotestate.WorkEpicUpdates, error) {
-	_ = key
-	return &remotestate.WorkEpicUpdates{}, nil
-}
-func (workFake) CreateEpicDesign(_ context.Context, epicKey string, _ remotestate.CreateWorkDesignRequest) (*remotestate.WorkMutationResponse, error) {
-	_ = epicKey
-	return &remotestate.WorkMutationResponse{Key: "PAY-D1"}, nil
+func (composePen) Open(_ context.Context, req provenance.OpenRequest) (*provenance.OpenResult, error) {
+	return &provenance.OpenResult{Branch: "orun/" + req.TaskKey + "-x", Pushed: true,
+		Opened: true, URL: "https://github.com/o/r/pull/7"}, nil
 }
