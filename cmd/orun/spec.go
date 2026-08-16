@@ -65,7 +65,7 @@ refs/work remote ride a later slice.)`,
 				slug, pin = args[0][:i], args[0][i+1:]
 			}
 
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}

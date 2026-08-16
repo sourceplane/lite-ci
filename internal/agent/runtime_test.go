@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sourceplane/orun/internal/agent/driver"
+	"github.com/sourceplane/orun/internal/contract"
 	"github.com/sourceplane/orun/internal/nodes"
 	"github.com/sourceplane/orun/internal/objectstore"
-	"github.com/sourceplane/orun/internal/worklens"
 )
 
 func TestBriefDeterministicAndSealed(t *testing.T) {
@@ -16,7 +16,7 @@ func TestBriefDeterministicAndSealed(t *testing.T) {
 		RunKind:  nodes.RunKindImplementation,
 		Task:     "ORN-142",
 		Persona:  []byte("# Implementer\n\npersona\n"),
-		Contract: &worklens.Contract{Goal: "sweep leases", Affects: []string{"a/b/c"}, DoneWhen: []string{"green"}, Gates: []string{"parity"}},
+		Contract: &contract.Contract{Goal: "sweep leases", Affects: []string{"a/b/c"}, DoneWhen: []string{"green"}, Gates: []string{"parity"}},
 		Affected: []string{"a/b/c", "a/b/d"},
 	}
 	a1, err := AssembleBrief(ctx, objectstore.NewMemStore(objectstore.AlgoSHA256), in)

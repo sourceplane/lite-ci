@@ -46,7 +46,7 @@ func newSkillsListCommand() *cobra.Command {
 		Short: "Every skill's latest revision: name, rev, source",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ func newSkillsListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -93,7 +93,7 @@ the revision it is.`,
 			if rev != "" && len(args) == 0 {
 				return fmt.Errorf("orun skills pull: --rev needs a skill name")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -126,7 +126,7 @@ the revision it is.`,
 	}
 	cmd.Flags().StringVar(&rev, "rev", "", "exact revision sha256:<hex> (single-name pulls)")
 	cmd.Flags().StringVar(&dir, "dir", filepath.Join(".claude", "skills"), "target directory for skill files")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -153,7 +153,7 @@ func fetchAllSkills(ctx context.Context, client *remotestate.Client, org string)
 // miss (not linked, not logged in, offline) is a WARNING, never a failed
 // session: the skills sharpen a run; their absence doesn't brick it.
 func materializeHarnessSkills(ctx context.Context, backendURL, workspace, workdir string, errOut io.Writer) {
-	client, err := workClient(ctx, backendURL, workspace)
+	client, err := cloudClient(ctx, backendURL, workspace)
 	if err != nil {
 		fmt.Fprintf(errOut, "orun agent: skills not materialized (%v) — continuing without them\n", err)
 		return

@@ -59,7 +59,7 @@ func newInitiativeStatusCommands() []*cobra.Command {
 			Long:  verb.long,
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client, err := workClient(cmd.Context(), backendURL, workspace)
+				client, err := cloudClient(cmd.Context(), backendURL, workspace)
 				if err != nil {
 					return err
 				}
@@ -83,7 +83,7 @@ func newInitiativeStatusCommands() []*cobra.Command {
 		if verb.forced {
 			cmd.Flags().BoolVar(&force, "force", false, "acknowledge open member tasks (the warn never blocks)")
 		}
-		addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+		addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 		cmds = append(cmds, cmd)
 	}
 	return cmds
@@ -129,7 +129,7 @@ directly; the derived signals only suggest. Staleness derives at read.`,
 			if strings.TrimSpace(message) == "" {
 				return fmt.Errorf("orun work update: -m is required — an update without a narrative is a mood, not an update")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -148,7 +148,7 @@ directly; the derived signals only suggest. Staleness derives at read.`,
 	}
 	cmd.Flags().StringVar(&health, "health", "", "on-track | at-risk | off-track (required)")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "the update narrative (required)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -163,7 +163,7 @@ func newInitiativesUpdatesCommand() *cobra.Command {
 		Short: "The update feed, newest first: attributed health headlines",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -186,7 +186,7 @@ func newInitiativesUpdatesCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -211,7 +211,7 @@ on a human. Truncation is always echoed (budget lines) — no silent caps.
 Use --json for the full typed view.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -231,7 +231,7 @@ Use --json for the full typed view.`,
 	cmd.Flags().IntVar(&depth, "depth", 0, "subtree depth below the item (server default 2, max 4)")
 	cmd.Flags().IntVar(&perLevel, "per-level", 0, "children per level (server default 50, max 200)")
 	cmd.Flags().IntVar(&activity, "activity", 0, "activity tail length (server default 20, max 100)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -301,7 +301,7 @@ The dispatch gate is unchanged: an sp_ seat into a non-approved epic still
 refuses unless --override supplies the attributed reason.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -324,7 +324,7 @@ refuses unless --override supplies the attributed reason.`,
 	}
 	cmd.Flags().BoolVar(&unassign, "unassign", false, "remove the assignment instead")
 	cmd.Flags().StringVar(&override, "override", "", "attributed override note for the dispatch gate")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -357,7 +357,7 @@ func newReviewRequestCommand() *cobra.Command {
 		Short: "Request review on an epic or a design",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -377,7 +377,7 @@ func newReviewRequestCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&note, "message", "m", "", "what to look at")
 	cmd.Flags().StringVar(&revision, "revision", "", "doc revision sha256:<hex> under review")
 	cmd.Flags().StringArrayVar(&reviewers, "reviewer", nil, "reviewer subject (repeatable)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -404,7 +404,7 @@ signed act.`,
 			if strings.TrimSpace(note) == "" {
 				return fmt.Errorf("orun initiatives review verdict: -m is required — an opinion without a reason is a vote, not a review")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -424,7 +424,7 @@ signed act.`,
 	cmd.Flags().StringVar(&verdict, "verdict", "", "approve | request_changes (required)")
 	cmd.Flags().StringVarP(&note, "message", "m", "", "the reasoning (required)")
 	cmd.Flags().StringVar(&revision, "revision", "", "doc revision the verdict pins")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -459,7 +459,7 @@ confirm, non-interactive runs require --yes. Human-only server-side.`,
 					return fmt.Errorf("orun work adopt: not confirmed")
 				}
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -479,7 +479,7 @@ confirm, non-interactive runs require --yes. Human-only server-side.`,
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt (non-interactive signature)")
 	cmd.Flags().StringVar(&taskPrefix, "task-prefix", "", "task-key prefix for minted skeletons (the epic's Space prefix wins)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -504,7 +504,7 @@ evidence-only, and the record names who asserted.`,
 			if strings.TrimSpace(note) == "" {
 				return fmt.Errorf("orun initiatives task done: -m is required — say why the work is done")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -520,7 +520,7 @@ evidence-only, and the record names who asserted.`,
 		},
 	}
 	cmd.Flags().StringVarP(&note, "message", "m", "", "why the work is done (required)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -544,7 +544,7 @@ moves no rung, feeds no health, triggers nothing. Clamped per seat
 			if strings.TrimSpace(text) == "" {
 				return fmt.Errorf("orun initiatives task note: -m is required")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -563,7 +563,7 @@ moves no rung, feeds no health, triggers nothing. Clamped per seat
 	}
 	cmd.Flags().StringVarP(&text, "message", "m", "", "the now line (required)")
 	cmd.Flags().StringVar(&ref, "ref", "", "evidence anchor: commit sha, file path, PR number")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -585,7 +585,7 @@ requested of you, idle milestones you own — newest-decision-first, each item
 carrying the one gesture that clears it. There is no second inbox.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -620,7 +620,7 @@ carrying the one gesture that clears it. There is no second inbox.`,
 	}
 	cmd.Flags().IntVar(&limit, "limit", 0, "maximum items")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from a prior page's cursor")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -645,7 +645,7 @@ latest worklog line and the seat working them. Quiet marks an assigned,
 in-flight task that has been silent past the quiet window.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -686,6 +686,6 @@ in-flight task that has been silent past the quiet window.`,
 	cmd.Flags().StringVar(&seat, "seat", "", "filter to one seat id (sp_…)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "maximum rows")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from a prior page's cursor")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }

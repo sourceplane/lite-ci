@@ -97,7 +97,7 @@ prints the compare URL plus the body to paste — honest either way.`,
 			manifest := provenance.Manifest{Version: provenance.ManifestVersion,
 				Skills: loadSessionSkillPins(), Session: session}
 			if quick != "" {
-				client, err := workClient(ctx, backendURL, workspace)
+				client, err := cloudClient(ctx, backendURL, workspace)
 				if err != nil {
 					return err
 				}
@@ -138,7 +138,7 @@ prints the compare URL plus the body to paste — honest either way.`,
 	cmd.Flags().StringVar(&base, "base", "main", "base branch")
 	cmd.Flags().BoolVar(&draft, "draft", false, "open as a draft")
 	cmd.Flags().StringVar(&session, "session", os.Getenv("ORUN_SESSION"), "session id for the manifest")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -210,7 +210,7 @@ this is the human-visible cross-reference for PRs opened outside the pen.`,
 			if strings.TrimSpace(url) == "" {
 				return fmt.Errorf("orun pr link: --url is required")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -226,7 +226,7 @@ this is the human-visible cross-reference for PRs opened outside the pen.`,
 		},
 	}
 	cmd.Flags().StringVar(&url, "url", "", "the PR URL to link (required)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 

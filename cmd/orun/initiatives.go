@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -96,57 +95,6 @@ Run 'orun work <subcommand> --help' for details.`,
 	root.AddCommand(cmd)
 }
 
-// workClient resolves scope + auth and builds the cloud client — the same
-// preamble as catalog push (flag > env > intent > cached link).
-func workClient(ctx context.Context, backendURLFlag, orgFlag string) (*remotestate.Client, error) {
-	backendURL, err := requireBackendURL(nil, backendURLFlag)
-	if err != nil {
-		return nil, err
-	}
-	repo, err := resolveRepoContext(backendURL)
-	if err != nil {
-		return nil, err
-	}
-	linkOrg, linkProject := "", ""
-	if repo != nil {
-		linkOrg, linkProject = repo.OrgID, repo.ProjectID
-	}
-	intentOrg, intentProject, _ := intentScope(loadIntentForCloudConfig())
-	scope := resolveScope(orgFlag, "", intentOrg, intentProject, linkOrg, linkProject)
-	if scope.OrgID == "" {
-		return nil, fmt.Errorf("orun work: no workspace resolved; pass --workspace or link the repo (orun auth login)")
-	}
-	tokenSrc, _, _, err := remotestate.ResolveTokenSource(ctx, remotestate.ResolveOptions{
-		BackendURL:   backendURL,
-		Version:      version,
-		Interactive:  termIsInteractive(),
-		RequireLogin: true,
-		Org:          scope.OrgID,
-	})
-	if err != nil {
-		if isNoLoginErr(err) {
-			return nil, errNotLoggedIn()
-		}
-		return nil, fmt.Errorf("remote state auth: %w", err)
-	}
-	return remotestate.NewClientWithScope(backendURL, version, tokenSrc, scope), nil
-}
-
-// addWorkScopeFlags registers the three flags every subcommand of the group
-// carries: --workspace, --backend-url, --json.
-func addWorkScopeFlags(cmd *cobra.Command, workspace, backendURL *string, asJSON *bool) {
-	cmd.Flags().StringVar(workspace, "workspace", "", "target workspace (org id or slug; defaults to the linked repo's)")
-	cmd.Flags().StringVar(backendURL, "backend-url", "", "Backend URL (Orun Cloud or self-hosted)")
-	cmd.Flags().BoolVar(asJSON, "json", false, "emit JSON")
-}
-
-// encodeJSON is the group's one JSON idiom: pretty-encoded response structs.
-func encodeJSON(cmd *cobra.Command, v interface{}) error {
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
 // ── list ─────────────────────────────────────────────────────────────────────
 
 func newInitiativesListCommand() *cobra.Command {
@@ -164,7 +112,7 @@ afterwards), two-segment progress, and the needs-you reasons that wait on a
 human. Nothing shown here is a stored status.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -179,7 +127,7 @@ human. Nothing shown here is a stored status.`,
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -230,7 +178,7 @@ milestone with derived state and progress, and each task with its rung and
 the evidence that put it there.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -245,7 +193,7 @@ the evidence that put it there.`,
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -402,7 +350,7 @@ health derive from its member epics' logs.
 			if slug == "" {
 				return fmt.Errorf("orun initiatives create: cannot derive a slug from %q; pass --slug", title)
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -430,7 +378,7 @@ health derive from its member epics' logs.
 	cmd.Flags().StringVar(&owner, "owner", "", "owner subject")
 	cmd.Flags().StringVar(&target, "target", "", "target date YYYY-MM-DD")
 	cmd.Flags().StringVar(&slug, "slug", "", "initiative slug (default: derived from --title)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -505,7 +453,7 @@ value (e.g. --owner "") to clear a field.`,
 				return fmt.Errorf("orun initiatives edit: nothing to change; pass at least one of --title/--description/--owner/--target/--initiative/--criteria")
 			}
 
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -526,7 +474,7 @@ value (e.g. --owner "") to clear a field.`,
 	cmd.Flags().StringVar(&target, "target", "", "target date YYYY-MM-DD; \"\" clears")
 	cmd.Flags().StringVar(&initiative, "initiative", "", "file an epic under this initiative key; \"\" unfiles")
 	cmd.Flags().StringArrayVar(&criteria, "criteria", nil, "success criterion (repeatable; initiatives)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -554,7 +502,7 @@ epics, instead.`,
 				fmt.Fprintf(cmd.OutOrStdout(), "Retire %s? This is terminal and cannot be un-canceled. Re-run with --yes to confirm.\n", key)
 				return fmt.Errorf("orun initiatives cancel: confirmation required (pass --yes)")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -570,7 +518,7 @@ epics, instead.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -672,7 +620,7 @@ re-imports skip existing specs and milestones).`,
 				return nil
 			}
 
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -695,7 +643,7 @@ re-imports skip existing specs and milestones).`,
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "WRK", "task-key prefix for imported milestones (2–5 uppercase)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the mapping without writing")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -727,7 +675,7 @@ func newInitiativesTaskViewCommand() *cobra.Command {
 		Short: "One task: rung ladder, evidence, components affected, activity",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -742,7 +690,7 @@ func newInitiativesTaskViewCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -884,7 +832,7 @@ afterwards — there is no status to set here, ever.`,
 					Goal: goal, DoneWhen: doneWhen, Affects: affects, Gates: gates, Deps: deps,
 				}
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -910,7 +858,7 @@ afterwards — there is no status to set here, ever.`,
 	cmd.Flags().StringArrayVar(&affects, "contract-affects", nil, "affected catalog component key (repeatable)")
 	cmd.Flags().StringArrayVar(&gates, "contract-gate", nil, "gate check (repeatable)")
 	cmd.Flags().StringArrayVar(&deps, "contract-dep", nil, "dependency task key (repeatable)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -933,7 +881,7 @@ its milestones' tasks, docs, and designs; an initiative covers its whole
 subtree.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -952,7 +900,7 @@ subtree.`,
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum entries to fetch")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from a prior page's cursor")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -997,7 +945,7 @@ design's doc — and print the markdown body to stdout (latest revision unless
 --rev pins one). Pipe it wherever you need the text.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -1016,7 +964,7 @@ design's doc — and print the markdown body to stdout (latest revision unless
 		},
 	}
 	cmd.Flags().StringVar(&rev, "rev", "", "revision digest sha256:<hex> (default: latest)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -1046,7 +994,7 @@ func newInitiativesDesignListCommand() *cobra.Command {
 		Short: "List an initiative's design runs with their folded intent state",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -1065,7 +1013,7 @@ func newInitiativesDesignListCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -1099,7 +1047,7 @@ readable history, never adoptable.`,
 				}
 				req.Proposal = json.RawMessage(proposal)
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -1117,6 +1065,6 @@ readable history, never adoptable.`,
 	cmd.Flags().StringVar(&title, "title", "", "design title (required)")
 	cmd.Flags().StringVar(&docRef, "doc-ref", "", "design doc revision sha256:<hex>")
 	cmd.Flags().StringVar(&proposal, "proposal", "", "structured proposal JSON ({\"milestones\":[…],\"taskSkeletons\":[…]})")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }

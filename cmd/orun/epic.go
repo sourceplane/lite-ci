@@ -73,7 +73,7 @@ approved. An unapproved epic has no brief (approval seals one; design §3).`,
 				slug, pin = args[0][:i], args[0][i+1:]
 			}
 
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}

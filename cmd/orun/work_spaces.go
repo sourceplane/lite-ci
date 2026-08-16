@@ -44,7 +44,7 @@ func newWorkSpacesListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "Every Space: prefix, title, owner team, epic count",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -68,7 +68,7 @@ func newWorkSpacesListCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&archived, "archived", false, "list retired/archived Spaces")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -83,7 +83,7 @@ func newWorkSpacesShowCommand() *cobra.Command {
 		Short: "One Space: the namespace record plus its epics as context rows",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ func newWorkSpacesShowCommand() *cobra.Command {
 			return nil
 		},
 	}
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -135,7 +135,7 @@ func newWorkSpacesCreateCommand() *cobra.Command {
 			if title == "" {
 				return fmt.Errorf("orun work spaces create: --title is required")
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -156,7 +156,7 @@ func newWorkSpacesCreateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed-key prefix (auto-suggested when omitted; WRK reserved)")
 	cmd.Flags().StringVar(&description, "description", "", "the why — one honest paragraph")
 	cmd.Flags().StringVar(&ownerTeam, "owner-team", "", "advisory owner team (team_…)")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -182,7 +182,7 @@ func newWorkSpacesUpdateCommand() *cobra.Command {
 			} else if ownerTeam != "" {
 				req.OwnerTeamID = &ownerTeam
 			}
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -201,7 +201,7 @@ func newWorkSpacesUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "new description")
 	cmd.Flags().StringVar(&ownerTeam, "owner-team", "", "advisory owner team (team_…)")
 	cmd.Flags().BoolVar(&clearOwner, "clear-owner-team", false, "clear the advisory owner team")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
 
@@ -224,7 +224,7 @@ headline, staleness derived at read), and the derived execution rollup
 (total/complete/blocked — never editable). Filter by --space, --state,
 --health; --archived reads the shelf.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := workClient(cmd.Context(), backendURL, workspace)
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
@@ -265,6 +265,6 @@ headline, staleness derived at read), and the derived execution rollup
 	cmd.Flags().StringVar(&state, "state", "", "planning | active | paused | completed | canceled")
 	cmd.Flags().StringVar(&health, "health", "", "on_track | at_risk | off_track")
 	cmd.Flags().BoolVar(&archived, "archived", false, "read the archived shelf")
-	addWorkScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
