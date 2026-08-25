@@ -115,6 +115,11 @@ func TestFindForKey(t *testing.T) {
 	if err != nil || doc != nil {
 		t.Fatalf("absent doc: %v %+v", err, doc)
 	}
+	// A non-key never becomes a path segment — create feeds this the key
+	// the CLOUD returned, and a hostile backend must not steer lookups.
+	if _, err := FindForKey(root, "../../etc/passwd"); err == nil {
+		t.Fatal("traversal-shaped key accepted")
+	}
 }
 
 func TestMissing(t *testing.T) {

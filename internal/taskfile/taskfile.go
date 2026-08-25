@@ -124,8 +124,13 @@ func PathFor(root, key string) string {
 
 // FindForKey loads the document for a key if one exists; (nil, nil) when
 // the file is absent — no document is a legal state (no contract ⇒ no
-// narrowing, TK-4), not an error.
+// narrowing, TK-4), not an error. The key is checked against the grammar
+// BEFORE it becomes a path segment: create feeds this the key the cloud
+// returned, and a hostile backend must not get to steer filesystem lookups.
 func FindForKey(root, key string) (*Document, error) {
+	if !keyRe.MatchString(key) {
+		return nil, fmt.Errorf("taskfile: %q is not a task key", key)
+	}
 	path := PathFor(root, key)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
