@@ -21,6 +21,14 @@ type Contract struct {
 	DesignRefs []string `json:"designRefs,omitempty"`
 	Deps       []string `json:"deps,omitempty"`
 
+	// Secrets and Envs are the enforcement fields (orun-tasks O1, design
+	// §4): secret-key globs and environment names this work may resolve.
+	// Under narrow-only enforcement a contract can only ever SHRINK what
+	// policy already allows — effective = resolved_policy ∩ contract — so
+	// absent means "no narrowing on that axis", never "allow everything".
+	Secrets []string `json:"secrets,omitempty"`
+	Envs    []string `json:"envs,omitempty"`
+
 	// GatesDefined distinguishes an explicit empty gate set (merge alone
 	// may finish the work) from gates simply never having been declared
 	// (gates unknown — the work is not agent-ready).

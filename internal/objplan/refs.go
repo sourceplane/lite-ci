@@ -88,3 +88,9 @@ func RevisionRefs(legacyChecksum string) []string {
 func TriggerRefs(triggerName string) []string {
 	return []string{"triggers/" + sanitizeRefSeg(triggerName) + "/latest"}
 }
+
+// TaskRefs returns the ref name a task node is published under (orun-tasks
+// O1): tasks/<key>. The ref is the GC root that keeps the task's contract
+// reachable — refs are the roots reachability marks from, and the task's
+// tree bundles its contract.
+func TaskRefs(key string) string { return "tasks/" + sanitizeRefSeg(key) }
