@@ -263,3 +263,27 @@ A non-object, store-level metadata file at the store root (mutable, single):
 
 Bumping `objectModelVersion` gates migrations; `hashAlgo` records the active
 algorithm for the store.
+
+## 11. Task — `task.json` + `contract.json` (orun-tasks O1)
+
+The store's first **non-derivable** node (orun-tasks TK-9): everything above
+can be rebuilt from a workspace checkout, but a task records an **issuance**
+— its key comes from the cloud allocator, the single writer of task identity.
+Identity: Merkle root of the node's tree.
+
+```json
+{ "kind": "Task", "apiVersion": "orun.io/v1", "key": "ENG-42",
+  "taskRef": "tsk_3KF9TQ2P", "title": "Ship the composer",
+  "contractHash": "sha256:…" }
+```
+
+- `contract.json` — the contract's canonical **wire** bytes, sealed by
+  `internal/contract.ContractID` (the byte-pinned twin of the cloud's
+  `contractHash`; conformance fixture in `internal/contract/fixtures/`).
+  Present iff `contractHash` is; the assembler refuses one without the other.
+- The contract rides **in the tree**, not as a string reference, because GC
+  reachability walks trees: the ref `refs/tasks/<key>` roots the node, the
+  node roots the contract, and a contract an audit trail cites survives for
+  as long as its task ref does (design §3.2 in the orun-tasks epic).
+- Deliberately **no rung, status or assignee**: the verdict derives at read
+  on the cloud (TK-M), and a tracker owns its own fields.

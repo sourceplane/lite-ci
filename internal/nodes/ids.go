@@ -60,3 +60,10 @@ func AgentSessionSegmentID(algo objectstore.Algo, g AgentSessionSegment) (Object
 func AgentSessionID(algo objectstore.Algo, s AgentSessionSnapshot) (ObjectID, error) {
 	return AssembleAgentSession(context.Background(), hashStore{algo}, s)
 }
+
+// TaskID returns the content id AssembleTask would produce for (t,
+// contractWire), without writing — identical contracts under identical
+// records dedup to one node id (the O1 dedup property, by construction).
+func TaskID(algo objectstore.Algo, t TaskRecord, contractWire []byte) (ObjectID, error) {
+	return AssembleTask(context.Background(), hashStore{algo}, t, contractWire)
+}

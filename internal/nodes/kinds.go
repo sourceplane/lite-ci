@@ -42,6 +42,9 @@ const (
 	KindAgentBrief           = "AgentBrief"
 	KindAgentSessionSnapshot = "AgentSessionSnapshot"
 	KindAgentSessionSegment  = "AgentSessionSegment"
+	// orun-tasks O1: the task ref's record — the store's first
+	// non-derivable object (TK-9). Its tree bundles the sealed contract.
+	KindTask = "Task"
 )
 
 // apiVersionV1 is the schema version stamped on records that carry one.
@@ -114,4 +117,9 @@ const (
 	fileAgentType     = "agent-type.json"
 	fileAgentBody     = "body.md"
 	fileAgentLiteracy = "base-literacy.md"
+	// Task tree entries (orun-tasks O1): the record plus the contract's
+	// canonical WIRE bytes — bundled so GC reachability from the task ref
+	// keeps the contract an audit trail cites (design §3.2).
+	fileTask         = "task.json"
+	fileTaskContract = "contract.json"
 )

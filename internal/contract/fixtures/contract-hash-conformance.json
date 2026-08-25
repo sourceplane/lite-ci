@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "generatedBy": "orun-cloud packages/contracts/src/tasks.ts contractHash",
+  "cases": [
+    {
+      "name": "empty contract",
+      "contract": {},
+      "canonical": "{}",
+      "hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "goal only",
+      "contract": {
+        "goal": "ship the composer"
+      },
+      "canonical": "{\"goal\":\"ship the composer\"}",
+      "hash": "sha256:c72da3a8aadde4de5750f945171ba18154a0750a441c5ae3fc7002941fdf65a3"
+    },
+    {
+      "name": "complete with declared gates",
+      "contract": {
+        "goal": "ship it",
+        "affects": [
+          "web-console-next",
+          "api-edge"
+        ],
+        "doneWhen": [
+          "one row per change"
+        ],
+        "gates": [
+          "tests",
+          "typecheck"
+        ]
+      },
+      "canonical": "{\"affects\":[\"web-console-next\",\"api-edge\"],\"doneWhen\":[\"one row per change\"],\"gates\":[\"tests\",\"typecheck\"],\"goal\":\"ship it\"}",
+      "hash": "sha256:dcb6f2544f5cdc18e333d70baea4207d5de31646e4874b5a01e82b48f3d0c5f9"
+    },
+    {
+      "name": "explicit empty gate set",
+      "contract": {
+        "goal": "g",
+        "affects": [
+          "x"
+        ],
+        "doneWhen": [
+          "d"
+        ],
+        "gatesDefined": true
+      },
+      "canonical": "{\"affects\":[\"x\"],\"doneWhen\":[\"d\"],\"gatesDefined\":true,\"goal\":\"g\"}",
+      "hash": "sha256:01633dd43d2ff05a8df7271cdee5ee157c3d753be16e05f8d39d95d219edc51d"
+    },
+    {
+      "name": "gatesDefined false is omitted",
+      "contract": {
+        "goal": "g",
+        "gatesDefined": false
+      },
+      "canonical": "{\"goal\":\"g\"}",
+      "hash": "sha256:f476559535db2735e48ed9636b0986deab57201bf54ae2d9dd557878229db654"
+    },
+    {
+      "name": "enforcement fields",
+      "contract": {
+        "goal": "narrow",
+        "affects": [
+          "billing-worker"
+        ],
+        "doneWhen": [
+          "done"
+        ],
+        "gates": [
+          "tests"
+        ],
+        "secrets": [
+          "STRIPE_TEST_*",
+          "PAYPAL_*"
+        ],
+        "envs": [
+          "dev",
+          "staging"
+        ]
+      },
+      "canonical": "{\"affects\":[\"billing-worker\"],\"doneWhen\":[\"done\"],\"envs\":[\"dev\",\"staging\"],\"gates\":[\"tests\"],\"goal\":\"narrow\",\"secrets\":[\"STRIPE_TEST_*\",\"PAYPAL_*\"]}",
+      "hash": "sha256:36dda7e644f4327d82bc9734db2df0016f7efe71110f230671cf2ba40f1fe862"
+    },
+    {
+      "name": "everything, unicode and escapes",
+      "contract": {
+        "goal": "käse \"quoted\" <tag> \\slash",
+        "affects": [
+          "a"
+        ],
+        "doneWhen": [
+          "b"
+        ],
+        "gates": [],
+        "gatesDefined": true,
+        "designRefs": [
+          "specs/x.md#s1"
+        ],
+        "deps": [
+          "ENG-1",
+          "WEB-2"
+        ],
+        "secrets": [
+          "K_*"
+        ],
+        "envs": [
+          "prod"
+        ]
+      },
+      "canonical": "{\"affects\":[\"a\"],\"deps\":[\"ENG-1\",\"WEB-2\"],\"designRefs\":[\"specs/x.md#s1\"],\"doneWhen\":[\"b\"],\"envs\":[\"prod\"],\"gatesDefined\":true,\"goal\":\"käse \\\"quoted\\\" <tag> \\\\slash\",\"secrets\":[\"K_*\"]}",
+      "hash": "sha256:019cf6b4918810ee3ceb1a2583977f1e14a5fb0109b2b00257741c366a9b6d48"
+    }
+  ]
+}
