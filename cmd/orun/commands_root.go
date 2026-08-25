@@ -234,7 +234,7 @@ func commandUsesIntent(cmd *cobra.Command) bool {
 func commandResolvesCloudConfig(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "auth", "cloud", "policy", "mcp":
+		case "auth", "cloud", "policy", "mcp", "task":
 			return true
 		}
 	}
@@ -288,6 +288,7 @@ func init() {
 	registerIntegrationsCommand(rootCmd)
 	registerPolicyCommand(rootCmd)
 	registerSkillsCommand(rootCmd)
+	registerTaskCommand(rootCmd)
 	registerPrCommand(rootCmd)
 	registerMcpCommand(rootCmd)
 	registerAgentCommand(rootCmd)
